@@ -63,6 +63,10 @@ void shell::dispatch(const std::string &command) {
       std::cout << "exit is a shell builtin" << std::endl;
       return;
     }
+    if (args[1] == "type") {
+      std::cout << "type is a shell builtin" << std::endl;
+      return;
+    }
     std::cout << args[1] << ": not found" << std::endl;
     return;
   }
