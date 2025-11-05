@@ -131,7 +131,7 @@ bool shell::set_working_directory(const fs::path &dir) {
   }
 
   if (!fs::exists(new_path) || !fs::is_directory(new_path)) {
-    std::cout << "cd: no such file or directory " << std::endl;
+    std::cout << "cd: " << dir.string() << ": No such file or directory" << std::endl;
     return false;
   }
 
