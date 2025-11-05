@@ -7,11 +7,12 @@
 #include <system_error>
 
 #ifdef _WIN32
-  #include <windows.h>
-  #include <shellapi.h> // CommandLineToArgvW if needed
+#include <windows.h>
+#include <shellapi.h> // CommandLineToArgvW if needed
+#include <stdexcept> // For runtime_error
 #else
-  #include <unistd.h>
-  #include <sys/wait.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -57,6 +58,53 @@ static std::wstring windows_quote_arg(const std::string& s) {
   out.push_back(L'"');
   return out;
 }
+
+inline std::wstring windows_widen(const std::string& str) {
+    if (str.empty()) {
+        return {};
+    }
+
+    // MultiByteToWideChar takes int for length, so we must cap input size.
+    if (str.length() > static_cast<size_t>(INT_MAX)) {
+        throw std::runtime_error("String is too large to convert.");
+    }
+
+    const int input_length = static_cast<int>(str.length());
+
+    // We tell the API our string is UTF-8 (CP_UTF8).
+    // MB_ERR_INVALID_CHARS makes the function fail if it encounters invalid UTF-8.
+    int required_size = MultiByteToWideChar(
+        CP_UTF8,                      // Code page (UTF-8)
+        MB_ERR_INVALID_CHARS,         // Error flags
+        str.c_str(),                  // Input string
+        input_length,                 // Length of input string (bytes)
+        nullptr,                      // No output buffer
+        0                             // Request required buffer size
+    );
+
+    if (required_size == 0) {
+        throw std::runtime_error("Failed to get buffer size for string conversion.");
+    }
+
+    std::wstring wide_str;
+    wide_str.resize(required_size);
+
+    // Note: &wide_str[0] is a non-const pointer to the internal buffer.
+    int bytes_written = MultiByteToWideChar(
+        CP_UTF8,                      // Code page (UTF-8)
+        MB_ERR_INVALID_CHARS,         // Error flags
+        str.c_str(),                  // Input string
+        input_length,                 // Length of input string (bytes)
+        &wide_str[0],                 // Output buffer
+        required_size                 // Size of output buffer (wchar_t's)
+    );
+
+    if (bytes_written == 0) {
+        throw std::runtime_error("Failed to convert string.");
+    }
+
+    return wide_str;
+}
 #endif
 
 static std::string join_arguments_for_execv(const std::vector<std::string>& args) {
@@ -71,13 +119,12 @@ static std::string join_arguments_for_execv(const std::vector<std::string>& args
 
 // Runs program at `exe` with arguments `args` (args does NOT need to include exe; we will include it).
 // Returns process exit code on success, or std::nullopt on spawn error.
-std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<std::string>& args) {
+inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<std::string>& args) {
 #ifdef _WIN32
   // Build wide command line: exe path followed by quoted args
   std::wstring cmdline; // CreateProcessW expects mutable buffer, so we'll build it here
   // Quote program path (may contain spaces)
-  std::string exe_str = exe.string();
-  std::wstring exe_quoted = windows_quote_arg(exe_str);
+  std::wstring exe_quoted = windows_quote_arg(exe.filename().string());
   cmdline += exe_quoted;
 
   for (const auto& a : args) {
@@ -93,7 +140,7 @@ std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<s
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
   BOOL ok = CreateProcessW(
-      nullptr,                 // lpApplicationName (nullptr -> use command line)
+      windows_widen(exe.string()).c_str(),        // lpApplicationName (nullptr -> use command line)
       cmdbuf.data(),           // lpCommandLine (writable)
       nullptr,                 // lpProcessAttributes
       nullptr,                 // lpThreadAttributes
@@ -134,13 +181,12 @@ std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<s
     // Child: build argv array: argv[0] = exe, argv[1..] = args..., argv[n] = nullptr
     std::vector<char*> argv;
     argv.reserve(args.size() + 2);
-    std::string exe_str = exe.string();
-    argv.push_back(const_cast<char*>(exe_str.c_str()));
+    argv.push_back(const_cast<char*>(exe.filename().string().c_str()));
     for (const auto& a : args) argv.push_back(const_cast<char*>(a.c_str()));
     argv.push_back(nullptr);
 
     // execv replaces the child process
-    execv(exe_str.c_str(), argv.data());
+    execv(exe.string().c_str(), argv.data());
     // if execv returns, there was an error:
     _exit(127);
   } else {
