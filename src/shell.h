@@ -3,6 +3,7 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 
 #ifdef _WIN32
@@ -19,6 +20,7 @@ public:
   ~shell();
 
   [[noreturn]] void run();
+  std::optional<std::filesystem::path> get_path(const std::string& name);
 
   static std::vector<std::string> split(const std::string & string, char c);
   static std::vector<std::string_view> split_view(const std::string & string, char c);

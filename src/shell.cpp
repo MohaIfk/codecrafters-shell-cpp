@@ -1,8 +1,11 @@
 //
-// Created by info on 05/11/2025.
+// Created by theGhost on 05/11/2025.
 //
 
 #include "shell.h"
+#include "utils.h"
+#include <optional>
+
 #ifdef _MSC_VER
   #include <cstring> // for errno_t
   #include <malloc.h> // for _dupenv_s (allocates with malloc)
@@ -63,6 +66,52 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
   }
 }
 
+std::optional<std::filesystem::path> shell::get_path(const std::string& name) {
+  for (auto& path_dir: path_dirs) {
+    auto full_path = std::filesystem::path(path_dir) / name;
+#ifdef _WIN32
+    // Check for .exe, .bat, .cmd extensions on Windows
+    std::vector<std::string> exts = {".exe", ".bat", ".cmd"};
+
+    std::string name_lower = name;
+    std::ranges::transform(name_lower, name_lower.begin(), tolower);
+    bool name_has_ext = false;
+    for (const auto& e : exts) {
+      if (name_lower.size() >= e.size() && name_lower.compare(name_lower.size() - e.size(), e.size(), e) == 0) {
+        name_has_ext = true;
+        break;
+      }
+    }
+    if (name_has_ext) {
+      if (std::filesystem::exists(full_path) && std::filesystem::is_regular_file(full_path)) {
+        return full_path;
+      }
+    } else {
+      for (const auto& ext : exts) {
+        std::filesystem::path candidate = full_path;
+        candidate += ext; // append extension
+        if (std::filesystem::exists(candidate) && std::filesystem::is_regular_file(candidate)) {
+          return candidate;
+        }
+      }
+    }
+#else
+    if (std::filesystem::exists(full_path)) {
+      auto p = std::filesystem::status(full_path).permissions();
+      bool can_exec =
+        ((p & std::filesystem::perms::owner_exec) != std::filesystem::perms::none) ||
+        ((p & std::filesystem::perms::group_exec) != std::filesystem::perms::none) ||
+        ((p & std::filesystem::perms::others_exec) != std::filesystem::perms::none)
+        ;
+      if (can_exec) {
+        return full_path;
+      }
+    }
+#endif
+  }
+  return std::nullopt;
+}
+
 void shell::dispatch(const std::string &command) {
   std::vector<std::string> args = split(command, ' ');
   if (args[0] == "exit") {
@@ -101,38 +150,20 @@ void shell::dispatch(const std::string &command) {
       std::cout << "type is a shell builtin" << std::endl;
       return;
     }
-    // Check if a file with the command name exists.
-    // If the file exists and has execute permissions, print <command> is <full_path> and stop searching.
-    // If the file exists but doesn't have execute permissions, skip it and continue to the next directory.
-    for (auto& path_dir: path_dirs) {
-      auto full_path = std::filesystem::path(path_dir) / args[1];
-#ifdef _WIN32
-      // Check for .exe, .bat, .cmd extensions on Windows
-      std::vector<std::string> exts = {".exe", ".bat", ".cmd"};
-      for (auto& ext : exts) {
-        auto condidat = full_path;
-        condidat += ext;
-        if (std::filesystem::exists(condidat)) {
-          std::cout << args[1] << " is " << condidat.string() << std::endl;
-          return;
-        }
-      }
-#else
-      if (std::filesystem::exists(full_path)) {
-        auto p = std::filesystem::status(full_path).permissions();
-        bool can_exec =
-          ((p & std::filesystem::perms::owner_exec) != std::filesystem::perms::none) ||
-          ((p & std::filesystem::perms::group_exec) != std::filesystem::perms::none) ||
-          ((p & std::filesystem::perms::others_exec) != std::filesystem::perms::none)
-          ;
-        if (can_exec) {
-          std::cout << args[1] << " is " << full_path.string() << std::endl;
-          return;
-        }
-      }
-#endif
+    if (auto p = get_path(args[1])) {
+      std::cout << args[1] << " is " << p.value().string() << std::endl;
+      return;
     }
     std::cout << args[1] << ": not found" << std::endl;
+    return;
+  }
+  if (auto p = get_path(args[0])) {
+    std::vector<std::string> passArgs;
+    for (int i = 1; i < args.size(); i++) passArgs.emplace_back(args[i]);
+    auto exitCodeOpt = run_program_and_wait(p.value(), passArgs);
+    if (!exitCodeOpt) {
+      std::cerr << "Failed to spawn program\n";
+    }
     return;
   }
   std::cout << args[0] << ": command not found" << std::endl;
