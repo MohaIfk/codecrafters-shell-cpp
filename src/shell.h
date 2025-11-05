@@ -8,7 +8,7 @@ public:
   shell();
   ~shell();
 
-  void run();
+  [[noreturn]] void run();
 
   static std::vector<std::string> command_split(const std::string & string, char c);
 
