@@ -68,9 +68,34 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
     std::cout << "$ ";
     std::string command;
     std::getline(std::cin, command);
-    dispatch(command);
+    Command cmd = parse_command_with_redirect(command);
+    dispatch(cmd);
   }
 }
+
+Command shell::parse_command_with_redirect(const std::string &line) {
+  auto args = parse_args(line); // use the parser we already wrote
+  Command cmd;
+  size_t i = 0;
+  std::smatch m;
+  std::regex re(R"((\d*)?(>>|>))"); // matches optional digit + > or >>
+  while (i < args.size()) {
+    if (std::regex_match(args[i], m, re)) {
+      int fd = 1; // default
+      if (!m[1].str().empty()) fd = std::stoi(m[1].str());
+      bool append = (m[2].str() == ">>");
+      if (i + 1 >= args.size()) throw std::runtime_error("No file for redirection");
+      cmd.redirections.push_back({fd, args[i+1], append});
+      i += 2; // skip > and filename
+    } else {
+      cmd.args.push_back(args[i]);
+      i++;
+    }
+  }
+
+  return cmd;
+}
+
 
 std::optional<fs::path> shell::get_path(const std::string& name) {
   for (auto& path_dir: path_dirs) {
@@ -150,8 +175,12 @@ bool shell::set_working_directory(const fs::path &dir) {
   }
 }
 
-void shell::dispatch(const std::string &command) {
-  std::vector<std::string> args = parse_args(command);
+void shell::dispatch(const Command &command) {
+  std::vector<std::string> args = command.args;
+
+  // Apply redirections temporarily
+  ScopedRedir redir(command.redirections);
+
   if (args[0] == "exit") {
     if (args.size() == 2) {
       try {
@@ -222,7 +251,7 @@ void shell::dispatch(const std::string &command) {
   if (auto p = get_path(args[0])) {
     std::vector<std::string> passArgs;
     for (int i = 1; i < args.size(); i++) passArgs.emplace_back(args[i]);
-    auto exitCodeOpt = run_program_and_wait(p.value(), passArgs);
+    auto exitCodeOpt = run_program_and_wait(p.value(), passArgs, command.redirections);
     if (!exitCodeOpt) {
       std::cerr << "Failed to spawn program\n";
     }

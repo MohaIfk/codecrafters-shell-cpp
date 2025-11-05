@@ -4,16 +4,16 @@
 #include <vector>
 #include <optional>
 #include <iostream>
-#include <system_error>
 
 #ifdef _WIN32
 #include <windows.h>
-#include <shellapi.h> // CommandLineToArgvW if needed
+#include <io.h>
 #include <stdexcept> // For runtime_error
 #else
 #include <unistd.h>
 #include <sys/wait.h>
 #endif
+#include <fcntl.h> // For both os
 
 namespace fs = std::filesystem;
 
@@ -141,13 +141,12 @@ static std::string join_arguments_for_execv(const std::vector<std::string>& args
 
 // Runs program at `exe` with arguments `args` (args does NOT need to include exe; we will include it).
 // Returns process exit code on success, or std::nullopt on spawn error.
-inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<std::string>& args) {
+inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::vector<std::string>& args, const std::vector<Redirection>& redir) {
 #ifdef _WIN32
   // Build wide command line: exe path followed by quoted args
-  std::wstring cmdline; // CreateProcessW expects mutable buffer, so we'll build it here
+  // CreateProcessW expects mutable buffer, so we'll build it here
   // Quote program path (may contain spaces)
-  std::wstring exe_quoted = windows_quote_arg(exe.filename().string());
-  cmdline += exe_quoted;
+  std::wstring cmdline = windows_quote_arg(exe.filename().string());
 
   for (const auto& a : args) {
     cmdline += L' ';
@@ -160,18 +159,51 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
 
   STARTUPINFOW si{};
   si.cb = sizeof(si);
+  si.dwFlags |= STARTF_USESTDHANDLES;
+
+  // Open files for redirection
+  HANDLE hFiles[3] = { INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE };
+  for (auto &r : redir) {
+    DWORD access = (r.fd == 0) ? GENERIC_READ : GENERIC_WRITE;
+    DWORD creation = r.append ? OPEN_ALWAYS : CREATE_ALWAYS;
+    HANDLE hFile = CreateFileW(
+      windows_widen(r.filename).c_str(),
+      access,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      nullptr,
+      creation,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr
+    );
+    if (hFile == INVALID_HANDLE_VALUE) {
+      for (HANDLE h : hFiles) if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+      return std::nullopt;
+    }
+
+    if (r.append) SetFilePointer(hFile, 0, nullptr, FILE_END);
+
+    if (r.fd == 0) si.hStdInput = hFile;
+    else if (r.fd == 1) si.hStdOutput = hFile;
+    else if (r.fd == 2) si.hStdError = hFile;
+
+    if (r.fd >=0 && r.fd <=2) hFiles[r.fd] = hFile;
+  }
+
   PROCESS_INFORMATION pi{};
   BOOL ok = CreateProcessW(
       windows_widen(exe.string()).c_str(),        // lpApplicationName (nullptr -> use command line)
       cmdbuf.data(),           // lpCommandLine (writable)
       nullptr,                 // lpProcessAttributes
       nullptr,                 // lpThreadAttributes
-      FALSE,                   // bInheritHandles
+      TRUE,                   // bInheritHandles
       0,                       // dwCreationFlags
       nullptr,                 // lpEnvironment
       nullptr,                 // lpCurrentDirectory
       &si, &pi
   );
+
+  for (HANDLE h : hFiles) if (h != INVALID_HANDLE_VALUE) CloseHandle(h); // close handles in parent
+
   if (!ok) {
     // DWORD err = GetLastError();
     // std::cerr << "CreateProcessW failed: " << err << "\n";
@@ -200,6 +232,15 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
     return std::nullopt;
   }
   if (pid == 0) {
+    // Apply redirections
+    for (auto &r : redir) {
+      int flags = (r.fd == 0) ? O_RDONLY : (O_CREAT | O_WRONLY | (r.append ? O_APPEND : O_TRUNC));
+      int fd = open(r.filename.c_str(), flags, 0644);
+      if (fd < 0) { perror("open"); _exit(127); }
+      if (dup2(fd, r.fd) < 0) { perror("dup2"); _exit(127); }
+      close(fd);
+    }
+
     // Child: build argv array: argv[0] = exe, argv[1..] = args..., argv[n] = nullptr
     std::vector<char*> argv;
     argv.reserve(args.size() + 2);
@@ -314,3 +355,50 @@ inline std::vector<std::string> parse_args(const std::string &input) {
     push_current();
     return args;
 }
+
+// Helper for redirection for builtin
+class ScopedRedir {
+public:
+  explicit ScopedRedir(const std::vector<Redirection>& redirs) {
+    for (auto &r : redirs) {
+      int target_fd = r.fd;
+#ifdef _WIN32
+      int flags = _O_TEXT | (r.fd == 0 ? _O_RDONLY : _O_WRONLY | _O_CREAT);
+      if (r.append) flags |= _O_APPEND; else flags |= _O_TRUNC;
+      int fd = _wopen(windows_widen(r.filename).c_str(), flags, _S_IREAD | _S_IWRITE);
+      if (fd < 0) continue;
+
+      old_fds.push_back(target_fd);
+      old_copies.push_back(_dup(target_fd));
+      _dup2(fd, target_fd);
+      _close(fd);
+#else
+      int flags = (r.fd == 0 ? O_RDONLY : O_CREAT | O_WRONLY);
+      flags |= r.append ? O_APPEND : O_TRUNC;
+      int fd = open(r.filename.c_str(), flags, 0644);
+      if (fd < 0) continue;
+
+      old_fds.push_back(target_fd);
+      old_copies.push_back(dup(target_fd));
+      dup2(fd, target_fd);
+      close(fd);
+#endif
+    }
+  }
+
+  ~ScopedRedir() {
+    for (size_t i = 0; i < old_fds.size(); i++) {
+#ifdef _WIN32
+      _dup2(old_copies[i], old_fds[i]);
+      _close(old_copies[i]);
+#else
+      dup2(old_copies[i], old_fds[i]);
+      close(old_copies[i]);
+#endif
+    }
+  }
+
+private:
+  std::vector<int> old_fds;
+  std::vector<int> old_copies;
+};
