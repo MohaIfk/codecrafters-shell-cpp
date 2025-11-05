@@ -43,5 +43,13 @@ void shell::dispatch(const std::string &command) {
     }
     std::exit(0); // default
   }
+  if (args[0] == "echo") {
+    for (size_t i = 1; i < args.size(); i++) {
+      std::cout << args[i];
+      if (i + 1 < args.size()) std::cout << ' ';
+    }
+    std::cout << std::endl;
+    return;
+  }
   std::cout << args[0] << ": command not found" << std::endl;
 }
