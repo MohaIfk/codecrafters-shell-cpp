@@ -4,6 +4,7 @@
 
 #include "shell.h"
 #include "utils.h"
+#include "inputHelper.h"
 #include <optional>
 
 #ifdef _MSC_VER
@@ -62,14 +63,71 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
   return parts;
 }
 
+void shell::handle_completion(std::string& line) const {
+  std::vector<std::string> matches;
+
+  // Find all builtins that start with the current line
+  for (const auto& cmd : builtins) {
+    if (cmd.starts_with(line)) {
+      matches.push_back(cmd);
+    }
+  }
+
+  // If there's exactly one match, complete it
+  if (matches.size() == 1) {
+    std::string completion = matches[0] + " ";
+    // Find the part we're missing
+    std::string remainder = completion.substr(line.length());
+
+    // Append the missing part to our buffer
+    line = completion;
+
+    // Print the missing part to the screen
+    std::cout << remainder;
+    std::cout.flush();
+  }
+  // Optional: If matches.size() > 1, we could print all matches
+}
 
 [[noreturn]] void shell::run() {
+  enableRawMode();
+  std::string line;
+
   while (true) {
     std::cout << "$ ";
-    std::string command;
-    std::getline(std::cin, command);
-    Command cmd = parse_command_with_redirect(command);
-    dispatch(cmd);
+    std::cout.flush();
+    line.clear();
+
+    while (true) {
+      int c = get_char_raw();
+
+      if (c == '\t') {
+        handle_completion(line);
+      } else if (c == '\n' || c == '\r') {
+        std::cout << std::endl;
+        if (line.empty()) break;
+
+        Command cmd = parse_command_with_redirect(line);
+        dispatch(cmd);
+
+        // On "exit", restore the terminal and quit
+        if (!cmd.args.empty() && cmd.args[0] == "exit") {
+          disableRawMode();
+          std::exit(0);
+        }
+        break;
+      } else if (c == 127 || c == '\b') {
+        if (!line.empty()) {
+          line.pop_back();
+          std::cout << "\b \b";
+          std::cout.flush();
+        }
+      } else {
+        line += static_cast<char>(c);
+        std::cout << static_cast<char>(c);
+        std::cout.flush();
+      }
+    }
   }
 }
 

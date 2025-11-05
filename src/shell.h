@@ -27,12 +27,15 @@ class shell {
   std::string path;
   std::vector<std::string_view> path_dirs;
   std::filesystem::path working_directory_;
+  const std::vector<std::string> builtins = {"echo", "exit", "pwd", "cd", "type"};
+
 public:
   shell();
   ~shell();
 
+  void handle_completion(std::string& line) const;
   [[noreturn]] void run();
-  Command parse_command_with_redirect(const std::string& line);
+  static Command parse_command_with_redirect(const std::string& line);
   std::optional<std::filesystem::path> get_path(const std::string& name);
   const std::filesystem::path& working_directory();
   bool set_working_directory(const std::filesystem::path& dir);
