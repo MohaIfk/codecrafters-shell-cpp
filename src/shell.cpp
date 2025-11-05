@@ -28,6 +28,12 @@ shell::shell() {
   path = std::getenv("PATH") ? std::getenv("PATH") : "";
 #endif
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
+  try {
+    working_directory_ = fs::current_path();
+  } catch (const fs::filesystem_error& e) {
+    // fallback to root
+    working_directory_ = fs::path("/");
+  }
 }
 shell::~shell() = default;
 
@@ -66,9 +72,9 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
   }
 }
 
-std::optional<std::filesystem::path> shell::get_path(const std::string& name) {
+std::optional<fs::path> shell::get_path(const std::string& name) {
   for (auto& path_dir: path_dirs) {
-    auto full_path = std::filesystem::path(path_dir) / name;
+    auto full_path = fs::path(path_dir) / name;
 #ifdef _WIN32
     // Check for .exe, .bat, .cmd extensions on Windows
     std::vector<std::string> exts = {".exe", ".bat", ".cmd"};
@@ -83,25 +89,25 @@ std::optional<std::filesystem::path> shell::get_path(const std::string& name) {
       }
     }
     if (name_has_ext) {
-      if (std::filesystem::exists(full_path) && std::filesystem::is_regular_file(full_path)) {
+      if (fs::exists(full_path) && fs::is_regular_file(full_path)) {
         return full_path;
       }
     } else {
       for (const auto& ext : exts) {
-        std::filesystem::path candidate = full_path;
+        fs::path candidate = full_path;
         candidate += ext; // append extension
-        if (std::filesystem::exists(candidate) && std::filesystem::is_regular_file(candidate)) {
+        if (fs::exists(candidate) && fs::is_regular_file(candidate)) {
           return candidate;
         }
       }
     }
 #else
-    if (std::filesystem::exists(full_path)) {
-      auto p = std::filesystem::status(full_path).permissions();
+    if (fs::exists(full_path)) {
+      auto p = fs::status(full_path).permissions();
       bool can_exec =
-        ((p & std::filesystem::perms::owner_exec) != std::filesystem::perms::none) ||
-        ((p & std::filesystem::perms::group_exec) != std::filesystem::perms::none) ||
-        ((p & std::filesystem::perms::others_exec) != std::filesystem::perms::none)
+        ((p & fs::perms::owner_exec) != fs::perms::none) ||
+        ((p & fs::perms::group_exec) != fs::perms::none) ||
+        ((p & fs::perms::others_exec) != fs::perms::none)
         ;
       if (can_exec) {
         return full_path;
@@ -110,6 +116,32 @@ std::optional<std::filesystem::path> shell::get_path(const std::string& name) {
 #endif
   }
   return std::nullopt;
+}
+
+const fs::path &shell::working_directory() {
+  return working_directory_;
+}
+
+bool shell::set_working_directory(const fs::path &dir) {
+  fs::path new_path;
+  if (dir.is_absolute()) {
+    new_path = dir;
+  } else {
+    new_path = working_directory_ / dir;
+  }
+
+  if (!fs::exists(new_path) || !fs::is_directory(new_path)) {
+    std::cerr << "cd: no such directory: " << new_path << "\n";
+    return false;
+  }
+
+  try {
+    working_directory_ = fs::canonical(new_path); // resolve symlinks
+    return true;
+  } catch (const fs::filesystem_error& e) {
+    std::cerr << "cd: failed: " << e.what() << "\n";
+    return false;
+  }
 }
 
 void shell::dispatch(const std::string &command) {
@@ -134,6 +166,10 @@ void shell::dispatch(const std::string &command) {
     std::cout << std::endl;
     return;
   }
+  if (args[0] == "pwd") {
+    std::cout << working_directory_.string() << std::endl;
+    return;
+  }
   if (args[0] == "type") {
     if (args.size() != 2) {
       std::cout << "Invalid arguments" << args[0] << std::endl;
@@ -144,6 +180,10 @@ void shell::dispatch(const std::string &command) {
     }
     if (args[1] == "exit") {
       std::cout << "exit is a shell builtin" << std::endl;
+      return;
+    }
+    if (args[1] == "pwd") {
+      std::cout << "pwd is a shell builtin" << std::endl;
       return;
     }
     if (args[1] == "type") {
