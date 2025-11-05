@@ -131,7 +131,7 @@ bool shell::set_working_directory(const fs::path &dir) {
   }
 
   if (!fs::exists(new_path) || !fs::is_directory(new_path)) {
-    std::cerr << "cd: no such directory: " << new_path << "\n";
+    std::cout << "cd: no such file or directory " << std::endl;
     return false;
   }
 
@@ -139,7 +139,7 @@ bool shell::set_working_directory(const fs::path &dir) {
     working_directory_ = fs::canonical(new_path); // resolve symlinks
     return true;
   } catch (const fs::filesystem_error& e) {
-    std::cerr << "cd: failed: " << e.what() << "\n";
+    std::cout << "cd: failed: " << e.what() << "\n";
     return false;
   }
 }
@@ -170,6 +170,14 @@ void shell::dispatch(const std::string &command) {
     std::cout << working_directory_.string() << std::endl;
     return;
   }
+  if (args[0] == "cd") {
+    if (args.size() != 2) {
+      std::cout << "cd: invalid number of args" << std::endl;
+      return;
+    }
+    set_working_directory(fs::path(args[1]));
+    return;
+  }
   if (args[0] == "type") {
     if (args.size() != 2) {
       std::cout << "Invalid arguments" << args[0] << std::endl;
@@ -184,6 +192,10 @@ void shell::dispatch(const std::string &command) {
     }
     if (args[1] == "pwd") {
       std::cout << "pwd is a shell builtin" << std::endl;
+      return;
+    }
+    if (args[1] == "cd") {
+      std::cout << "cd is a shell builtin" << std::endl;
       return;
     }
     if (args[1] == "type") {
