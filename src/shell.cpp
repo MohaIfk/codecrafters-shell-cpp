@@ -51,5 +51,20 @@ void shell::dispatch(const std::string &command) {
     std::cout << std::endl;
     return;
   }
+  if (args[0] == "type") {
+    if (args.size() != 2) {
+      std::cout << "Invalid arguments" << args[0] << std::endl;
+    }
+    if (args[1] == "echo") {
+      std::cout << "echo is a shell builtin" << std::endl;
+      return;
+    }
+    if (args[1] == "exit") {
+      std::cout << "exit is a shell builtin" << std::endl;
+      return;
+    }
+    std::cout << args[1] << ": not found" << std::endl;
+    return;
+  }
   std::cout << args[0] << ": command not found" << std::endl;
 }
