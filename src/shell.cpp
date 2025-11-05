@@ -25,9 +25,6 @@ shell::shell() {
   path = std::getenv("PATH") ? std::getenv("PATH") : "";
 #endif
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
-  for (const auto & path : path_dirs) {
-    std::cout << path << '\n';
-  }
 }
 shell::~shell() = default;
 
