@@ -151,7 +151,11 @@ bool shell::set_working_directory(const fs::path &dir) {
 }
 
 void shell::dispatch(const std::string &command) {
-  std::vector<std::string> args = split(command, ' ');
+  std::vector<std::string> args = parse_args(command);
+  for (auto& arg : args) {
+    std::cout << arg << " | ";
+  }
+  std::cout << std::endl;
   if (args[0] == "exit") {
     if (args.size() == 2) {
       try {

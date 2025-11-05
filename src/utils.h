@@ -232,3 +232,85 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
   }
 #endif
 }
+
+inline std::vector<std::string> parse_args(const std::string &input) {
+    std::vector<std::string> args;
+    std::string current;
+    bool in_single = false;
+    bool in_double = false;
+    size_t i = 0;
+
+    auto push_current = [&]() {
+        if (!current.empty()) {
+            args.push_back(current);
+            current.clear();
+        }
+    };
+
+    while (i < input.size()) {
+        char c = input[i];
+
+        if (in_single) {
+            if (c == '\'') {
+                in_single = false; // end single quote
+            } else {
+                current += c;
+            }
+            i++;
+        } else if (in_double) {
+            if (c == '"') {
+                in_double = false; // end double quote
+                i++;
+            } else if (c == '\\') {
+                i++;
+                if (i < input.size()) {
+                    // Only escape certain chars in double quotes, similar to Bash
+                    char next = input[i];
+                    if (next == '"' || next == '\\' || next == '$' || next == '`') {
+                        current += next;
+                    } else {
+                        current += '\\';
+                        current += next;
+                    }
+                    i++;
+                } else {
+                    // trailing backslash at end
+                    current += '\\';
+                }
+            } else {
+                current += c;
+                i++;
+            }
+        } else { // not in any quote
+            if (c == '\'') {
+                in_single = true;
+                i++;
+            } else if (c == '"') {
+                in_double = true;
+                i++;
+            } else if (c == '\\') {
+                i++;
+                if (i < input.size()) {
+                    current += input[i++];
+                } else {
+                    current += '\\';
+                }
+            } else if (c == ' ' || c == '\t') {
+                push_current();
+                i++;
+                // skip consecutive spaces
+                while (i < input.size() && (input[i] == ' ' || input[i] == '\t')) i++;
+            } else {
+                current += c;
+                i++;
+            }
+        }
+    }
+
+    if (in_single || in_double) {
+        throw std::runtime_error("Unclosed quote in command line");
+    }
+
+    push_current();
+    return args;
+}
