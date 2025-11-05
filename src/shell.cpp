@@ -35,6 +35,8 @@ shell::shell() {
     // fallback to root
     working_directory_ = fs::path("/");
   }
+
+  populate_executable_cache();
 }
 shell::~shell() = default;
 
@@ -63,33 +65,80 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
   return parts;
 }
 
-void shell::handle_completion(std::string& line) const {
-  std::vector<std::string> matches;
+// Helper function to check if a file is executable
+bool shell::is_executable(const std::filesystem::path &p) {
+  if (!fs::is_regular_file(p)) {
+    return false;
+  }
 
-  // Find all builtins that start with the current line
+#ifdef _WIN32
+  std::string ext = p.extension().string();
+  // Convert extension to lower for case-insensitive comparison
+  std::ranges::transform(ext, ext.begin(),
+      [](unsigned char c){ return std::tolower(c); });
+
+  return (ext == ".exe" || ext == ".bat" || ext == ".cmd");
+#else
+  auto perms = fs::status(p).permissions();
+  return ((perms & fs::perms::owner_exec) != fs::perms::none) ||
+         ((perms & fs::perms::group_exec) != fs::perms::none) ||
+         ((perms & fs::perms::others_exec) != fs::perms::none);
+#endif
+}
+
+void shell::populate_executable_cache() {
+  executable_cache.clear();
+
+  for (const auto& dir : path_dirs) {
+    if (!fs::exists(dir) || !fs::is_directory(dir)) {
+      continue;
+    }
+
+    // I use error_code to ignore permission-denied errors
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+      if (is_executable(entry.path())) {
+        executable_cache.insert(entry.path().filename().string());
+      }
+    }
+  }
+}
+
+void shell::handle_completion(std::string& line) const {
+  // Guard: Only complete the command itself, not its arguments
+  // (We can extend this later, but for now, it's safer)
+  if (line.find(' ') != std::string::npos) {
+    std::cout << "\x07"; // Ring bell I like it hhhh
+    std::cout.flush();
+    return;
+  }
+
+  std::set<std::string> matches; // Use std::set for auto-deduplication
+
   for (const auto& cmd : builtins) {
     if (cmd.starts_with(line)) {
-      matches.push_back(cmd);
+      matches.insert(cmd);
     }
   }
 
-  // If there's exactly one match, complete it
+  for (const auto& cmd : executable_cache) {
+    if (cmd.rfind(line, 0) == 0) {
+      matches.insert(cmd);
+    }
+  }
+
   if (matches.size() == 1) {
-    std::string completion = matches[0] + " ";
+    std::string completion = *matches.begin() + " "; // Get the single item
     // Find the part we're missing
     std::string remainder = completion.substr(line.length());
-
-    // Append the missing part to our buffer
     line = completion;
-
-    // Print the missing part to the screen
     std::cout << remainder;
     std::cout.flush();
-  } else if (matches.empty()) {
-    std::cout << '\x07'; // Bell character
+
+  } else if (matches.size() == 0) {
+    std::cout << "\x07"; // Bell character
     std::cout.flush();
   }
-  // If matches.size() > 1, we do nothing (no completion, no bell)
 }
 
 [[noreturn]] void shell::run() {

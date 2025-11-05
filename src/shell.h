@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <regex>
+#include <set>
 
 #ifdef _WIN32
 constexpr char PATH_LIST_SEPARATOR = ';';
@@ -28,11 +29,14 @@ class shell {
   std::vector<std::string_view> path_dirs;
   std::filesystem::path working_directory_;
   const std::vector<std::string> builtins = {"echo", "exit", "pwd", "cd", "type"};
+  std::set<std::string> executable_cache;
 
 public:
   shell();
   ~shell();
 
+  static bool is_executable(const std::filesystem::path& p);
+  void populate_executable_cache();
   void handle_completion(std::string& line) const;
   [[noreturn]] void run();
   static Command parse_command_with_redirect(const std::string& line);
