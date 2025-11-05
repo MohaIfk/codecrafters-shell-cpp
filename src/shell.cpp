@@ -85,8 +85,11 @@ void shell::handle_completion(std::string& line) const {
     // Print the missing part to the screen
     std::cout << remainder;
     std::cout.flush();
+  } else if (matches.empty()) {
+    std::cout << '\x07'; // Bell character
+    std::cout.flush();
   }
-  // Optional: If matches.size() > 1, we could print all matches
+  // If matches.size() > 1, we do nothing (no completion, no bell)
 }
 
 [[noreturn]] void shell::run() {
