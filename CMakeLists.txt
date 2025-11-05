@@ -8,4 +8,4 @@ set(CMAKE_CXX_STANDARD 23) # Enable the C++23 standard
 
 add_executable(shell ${SOURCE_FILES})
 
-target_link_libraries(shell PRIVATE readline)
+# target_link_libraries(shell PRIVATE readline)
