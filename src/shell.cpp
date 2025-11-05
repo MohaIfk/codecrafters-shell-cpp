@@ -124,10 +124,16 @@ const fs::path &shell::working_directory() {
 
 bool shell::set_working_directory(const fs::path &dir) {
   fs::path new_path;
-  if (dir.is_absolute()) {
-    new_path = dir;
+  if (dir.string() == "~") {
+    if (auto home_dir = get_home_directory()) {
+      new_path = home_dir.value();
+    }
   } else {
-    new_path = working_directory_ / dir;
+    if (dir.is_absolute()) {
+      new_path = dir;
+    } else {
+      new_path = working_directory_ / dir;
+    }
   }
 
   if (!fs::exists(new_path) || !fs::is_directory(new_path)) {
@@ -172,6 +178,10 @@ void shell::dispatch(const std::string &command) {
   }
   if (args[0] == "cd") {
     if (args.size() != 2) {
+      if (args.size() == 1) {
+        set_working_directory(fs::path("~")); // Default
+        return;
+      }
       std::cout << "cd: invalid number of args" << std::endl;
       return;
     }

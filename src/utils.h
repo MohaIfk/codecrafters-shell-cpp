@@ -17,6 +17,28 @@
 
 namespace fs = std::filesystem;
 
+inline std::optional<fs::path> get_home_directory() {
+#ifdef _WIN32
+  // First try USERPROFILE
+  if (const char* userprofile = std::getenv("USERPROFILE")) {
+    return fs::path(userprofile);
+  }
+  // Fallback: HOMEDRIVE + HOMEPATH
+  const char* homedrive = std::getenv("HOMEDRIVE");
+  const char* homepath = std::getenv("HOMEPATH");
+  if (homedrive && homepath) {
+    return fs::path(std::string(homedrive) + std::string(homepath));
+  }
+  return std::nullopt;
+#else
+  // POSIX: $HOME
+  if (const char* home = std::getenv("HOME")) {
+    return fs::path(home);
+  }
+  return std::nullopt;
+#endif
+}
+
 #ifdef _WIN32
 // Quote an argument for Windows CreateProcess command line.
 // This is a conservative quoting implementation following MS rules:
