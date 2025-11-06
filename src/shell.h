@@ -37,7 +37,7 @@ public:
 
   static bool is_executable(const std::filesystem::path& p);
   void populate_executable_cache();
-  void handle_completion(std::string& line) const;
+  void handle_completion(std::string& line, bool second_tab = false) const;
   [[noreturn]] void run();
   static Command parse_command_with_redirect(const std::string& line);
   std::optional<std::filesystem::path> get_path(const std::string& name);

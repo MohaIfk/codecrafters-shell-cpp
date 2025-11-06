@@ -105,7 +105,7 @@ void shell::populate_executable_cache() {
   }
 }
 
-void shell::handle_completion(std::string& line) const {
+void shell::handle_completion(std::string& line, bool second_tab) const {
   // Guard: Only complete the command itself, not its arguments
   // (We can extend this later, but for now, it's safer)
   if (line.find(' ') != std::string::npos) {
@@ -135,11 +135,10 @@ void shell::handle_completion(std::string& line) const {
     line = completion;
     std::cout << remainder;
     std::cout.flush();
-  } else if (matches.empty()) {
-    std::cout << "\x07"; // Bell character
+  } else if (matches.empty() || (!second_tab)) {
+    std::cout << "\x07"; // Bell again Hhhhh (Ring ring!)
     std::cout.flush();
   } else {
-    std::cout << "\x07"; // Bell again Hhhhh (Ring ring!)
     std::cout << "\n";
     int i = 0;
     for (auto& matche : matches) {
@@ -158,12 +157,15 @@ void shell::handle_completion(std::string& line) const {
     std::cout << "$ ";
     std::cout.flush();
     line.clear();
+    bool second_tab = false;
 
     while (true) {
       int c = get_char_raw();
 
       if (c == '\t') {
-        handle_completion(line);
+        handle_completion(line, second_tab);
+        second_tab = (!second_tab);
+        continue;
       } else if (c == '\n' || c == '\r') {
         std::cout << std::endl;
         if (line.empty()) break;
@@ -188,6 +190,7 @@ void shell::handle_completion(std::string& line) const {
         std::cout << static_cast<char>(c);
         std::cout.flush();
       }
+      second_tab = false;
     }
   }
 }
