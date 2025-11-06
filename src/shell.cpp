@@ -206,12 +206,49 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
     while (true) {
       int c = get_char_raw();
 
+#ifdef _WIN32
+      // 224 (0xE0) is the prefix for special keys
+      if (c == 224) {
+        int next_char = get_char_raw();
+        if (next_char == 72) {
+          // UP arrow
+          if (!history_list.empty() && history_index > 0) {
+            if (history_index == history_list.size()) {
+              // first time pressing up saving the current line
+              current_line_backup = line;
+            }
+            history_index--;
+
+            // Redraw line
+            std::cout << "\r$ " << std::string(line.size(), ' ') << "\r$ ";
+            line = history_list[history_index];
+            std::cout << line;
+            std::cout.flush();
+          }
+        } else if (next_char == 80) {
+          // DOWN arrow
+          if (history_index < history_list.size()) {
+            history_index++;
+
+            std::cout << "\r$ " << std::string(line.size(), ' ') << "\r$ ";
+
+            if (history_index == history_list.size()) {
+              // Reached the bottom, restore the original line
+              line = current_line_backup;
+            } else {
+              line = history_list[history_index];
+            }
+            std::cout << line;
+            std::cout.flush();
+          }
+        }
+#else
       if (c == 27) { // ESCAPE key
         int next1 = get_char_raw();
         if (next1 == '[') {
           int next2 = get_char_raw();
           if (next2 == 'A') {
-            // UP arraw
+            // UP arrow
             if (!history_list.empty() && history_index > 0) {
               if (history_index == history_list.size()) {
                 // first time pressing up saving the current line
@@ -243,6 +280,7 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
             }
           }
         }
+#endif
         second_tab = false;
         continue;
       } else if (c == '\t') {
