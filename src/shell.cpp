@@ -143,7 +143,7 @@ void shell::handle_completion(std::string& line) const {
     std::cout << "\n";
     int i = 0;
     for (auto& matche : matches) {
-      std::cout << ((i!=0) ? " " : (i=1,"")) << matche;
+      std::cout << ((i!=0) ? "  " : (i=1,"")) << matche;
     }
     std::cout << "\n$ " << line;
     std::cout.flush();
