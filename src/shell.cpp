@@ -211,14 +211,13 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
         std::cout << std::endl;
         if (line.empty()) break;
 
-        Command cmd = parse_command_with_redirect(line);
-        dispatch(cmd);
-
-        // On "exit", restore the terminal and quit
-        if (!cmd.args.empty() && cmd.args[0] == "exit") {
-          disableRawMode();
-          std::exit(0);
+        try {
+          std::vector<Command> pipeline = parse_line_to_pipeline(line);
+          dispatch_pipeline(pipeline);
+        } catch (const std::runtime_error& e) {
+          std::cerr << "Error: " << e.what() << std::endl;
         }
+        // The 'exit' check is now inside dispatch_pipeline
         break;
       } else if (c == 127 || c == '\b') {
         if (!line.empty()) {
@@ -236,29 +235,58 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
   }
 }
 
-Command shell::parse_command_with_redirect(const std::string &line) {
-  auto args = parse_args(line); // use the parser we already wrote
-  Command cmd;
+/**
+ * Parses a full command line, splitting it by '|' into a pipeline of commands.
+ * Redirections (>, >>) are attached to the command they immediately follow.
+ */
+std::vector<Command> shell::parse_line_to_pipeline(const std::string &line) {
+  auto args = parse_args(line);
+  std::vector<Command> pipeline;
+  Command current_command;
+
   size_t i = 0;
   std::smatch m;
   std::regex re(R"((\d*)?(>>|>))"); // matches optional digit + > or >>
   while (i < args.size()) {
-    if (std::regex_match(args[i], m, re)) {
+    if (args[i] == "|") {
+      if (current_command.args.empty()) {
+        // Error: '||' or '| cmd'
+        throw std::runtime_error("Invalid pipeline: empty command before '|'");
+      }
+      pipeline.push_back(current_command);
+      current_command = Command{}; // Reset for the next command
+      i++;
+    } else if (std::regex_match(args[i], m, re)) {
+      // Found a redirection operator
       int fd = 1; // default
       if (!m[1].str().empty()) fd = std::stoi(m[1].str());
       bool append = (m[2].str() == ">>");
-      if (i + 1 >= args.size()) throw std::runtime_error("No file for redirection");
-      cmd.redirections.push_back({fd, args[i+1], append});
+      if (i + 1 >= args.size()) throw std::runtime_error("No filename provided for redirection");
+      // Add redirection to the current command
+      current_command.redirections.push_back({fd, args[i+1], append});
       i += 2; // skip > and filename
     } else {
-      cmd.args.push_back(args[i]);
+      // Just a regular argument
+      current_command.args.push_back(args[i]);
       i++;
     }
   }
 
-  return cmd;
+  // Add the last command to the pipeline
+  if (current_command.args.empty()) {
+    if (!pipeline.empty()) {
+      // Error: 'cmd |'
+      throw std::runtime_error("Invalid pipeline: empty command at the end");
+    }
+    // else: just an empty line, which is fine
+  } else {
+    pipeline.push_back(current_command);
+  }
+  return pipeline;
 }
 
+// Removed
+// Command shell::parse_command_with_redirect(const std::string &line)
 
 std::optional<fs::path> shell::get_path(const std::string& name) {
   for (auto& path_dir: path_dirs) {
@@ -338,7 +366,7 @@ bool shell::set_working_directory(const fs::path &dir) {
   }
 }
 
-void shell::dispatch(const Command &command) {
+void shell::execute_simple_command(const Command &command) {
   std::vector<std::string> args = command.args;
 
   // Apply redirections temporarily
@@ -421,4 +449,259 @@ void shell::dispatch(const Command &command) {
     return;
   }
   std::cout << args[0] << ": command not found" << std::endl;
+}
+
+void shell::dispatch_pipeline(const std::vector<Command> &pipeline) {
+  if (pipeline.empty()) {
+    return;
+  }
+
+  if (pipeline.size() == 1) {
+    if (!pipeline[0].args.empty() && pipeline[0].args[0] == "exit") {
+      disableRawMode();
+      if (pipeline[0].args.size() == 2) {
+        try {
+          std::exit(std::stoi(pipeline[0].args[1]));
+        } catch (...) {
+          std::cout << "Invalid exit code." << std::endl;
+        }
+      }
+      std::exit(0); // Default exit
+    }
+    // Just a single command, run it normally
+    execute_simple_command(pipeline[0]);
+    return;
+  }
+
+  // This is a multi-command pipeline.
+  // For now, we only pipe external commands.
+  for (const auto& cmd : pipeline) {
+    if (builtins.contains(cmd.args[0])) {
+      std::cerr << "Error: Built-in command '" << cmd.args[0] << "' cannot be used in a pipeline." << std::endl;
+      return;
+    }
+  }
+
+  // Execute the full pipeline
+  execute_pipeline_external(pipeline);
+}
+
+// I will probably move this function to utils.h in the future
+void shell::execute_pipeline_external(const std::vector<Command> &pipeline) {
+#ifdef _WIN32
+  std::vector<PROCESS_INFORMATION> process_infos;
+  std::vector<HANDLE> handles_to_close; // All handles the parent must close
+
+  HANDLE in_handle = GetStdHandle(STD_INPUT_HANDLE);
+
+  for (size_t i = 0; i < pipeline.size(); ++i) {
+    const auto& cmd = pipeline[i];
+    bool is_last = (i == pipeline.size() - 1);
+
+    HANDLE hReadPipe = INVALID_HANDLE_VALUE;
+    HANDLE hWritePipe = INVALID_HANDLE_VALUE;
+
+    // 1. Create a pipe for this command's output, unless it's the last one
+    if (!is_last) {
+      SECURITY_ATTRIBUTES sa;
+      sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+      sa.bInheritHandle = TRUE; // Child process must inherit write handle
+      sa.lpSecurityDescriptor = nullptr;
+
+      if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+        std::cerr << "Failed to create pipe for command '" << cmd.args[0] << "'." << std::endl;
+        return;
+      }
+      // Make the READ handle *non-inheritable* so the *next* child
+      // doesn't accidentally inherit it.
+      if (!SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0)) {
+        std::cerr << "Failed to set handle information for command '" << cmd.args[0] << "'." << std::endl;
+        return;
+      }
+      handles_to_close.push_back(hReadPipe);
+      handles_to_close.push_back(hWritePipe);
+    }
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+
+    // 2. Set up STD handles
+    si.hStdInput = (i > 0) ? in_handle : GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = (!is_last) ? hWritePipe : GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+
+    std::vector<HANDLE> redir_file_handles;
+    // Apply file redirections (these will override the pipe handles)
+    for (auto &r : cmd.redirections) {
+      DWORD access = (r.fd == 0) ? GENERIC_READ : GENERIC_WRITE;
+      DWORD creation = r.append ? OPEN_ALWAYS : CREATE_ALWAYS;
+      HANDLE hFile = CreateFileW(
+        windows_widen(r.filename).c_str(), access,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, creation,
+        FILE_ATTRIBUTE_NORMAL, nullptr
+      );
+      if (hFile == INVALID_HANDLE_VALUE) { /* error */ continue; }
+      if (r.append) SetFilePointer(hFile, 0, nullptr, FILE_END);
+
+      redir_file_handles.push_back(hFile);
+      handles_to_close.push_back(hFile); // Parent must close this
+
+      if (r.fd == 0) si.hStdInput = hFile;
+      else if (r.fd == 1) si.hStdOutput = hFile;
+      else if (r.fd == 2) si.hStdError = hFile;
+    }
+
+    // Find executable
+    auto exe_path_opt = get_path(cmd.args[0]);
+    if (!exe_path_opt) {
+      std::cerr << cmd.args[0] << ": command not found" << std::endl;
+      break;
+    }
+
+    // Build command line
+    std::wstring cmdline = windows_quote_arg(exe_path_opt.value().filename().string());
+    for (size_t j = 1; j < cmd.args.size(); ++j) {
+      cmdline += L' ';
+      cmdline += windows_quote_arg(cmd.args[j]);
+    }
+    std::vector<wchar_t> cmdbuf(cmdline.begin(), cmdline.end());
+    cmdbuf.push_back(L'\0');
+
+    // Create the process
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessW(
+        windows_widen(exe_path_opt.value().string()).c_str(),
+        cmdbuf.data(),
+        nullptr, nullptr,
+        TRUE, // bInheritHandles = TRUE
+        0, nullptr, nullptr,
+        &si, &pi
+    );
+
+    // Parent-side cleanup for this loop
+    if (i > 0) CloseHandle(in_handle); // Close previous read pipe
+    if (!is_last) CloseHandle(hWritePipe); // Close current write pipe
+    for (HANDLE h : redir_file_handles) CloseHandle(h); // Close file handles
+
+    if (!ok) {
+      std::cerr << "CreateProcessW failed for " << cmd.args[0] << "\n";
+      if (!is_last) CloseHandle(hReadPipe); // Must close read pipe
+      break; // Stop pipeline
+    }
+
+    process_infos.push_back(pi);
+    if (!is_last) {
+      in_handle = hReadPipe; // Pass read pipe to next child
+    }
+  }
+
+  // Wait for all child processes to finish
+  std::vector<HANDLE> p_handles;
+  for (auto& pi : process_infos) p_handles.push_back(pi.hProcess);
+
+  if (!p_handles.empty()) {
+    WaitForMultipleObjects(static_cast<DWORD>(p_handles.size()), p_handles.data(), TRUE, INFINITE);
+  }
+
+  // Final cleanup
+  for (auto& pi : process_infos) {
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+  }
+  // Close any pipe/file handles that were opened
+  for (HANDLE h : handles_to_close) {
+    CloseHandle(h);
+  }
+#else
+  // POSIX: fork + execv + pipe
+  std::vector<pid_t> pids;
+  int in_fd = STDIN_FILENO; // Input for the *first* command
+  int pipe_fds[2];
+
+  for (size_t i = 0; i < pipeline.size(); ++i) {
+    const auto& cmd = pipeline[i];
+    bool is_last = (i == pipeline.size() - 1);
+
+    // Create a pipe, unless it's the last command
+    if (!is_last) {
+      if (pipe(pipe_fds) < 0) {
+        perror("pipe");
+        return;
+      }
+    }
+
+    // Fork
+    pid_t pid = fork();
+    if (pid < 0) {
+      perror("fork");
+      return;
+    }
+
+    if (pid == 0) { // --- Child Process ---
+      // Set up input
+      if (i > 0) {
+        if (dup2(in_fd, STDIN_FILENO) < 0) { perror("dup2"); _exit(127); }
+        close(in_fd); // Close original
+      }
+
+      // Set up output
+      if (!is_last) {
+        if (dup2(pipe_fds[1], STDOUT_FILENO) < 0) { perror("dup2"); _exit(127); }
+        // Child doesn't need pipe ends after dup2
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+      }
+
+      // Apply file redirections (overrides pipes)
+      for (auto &r : cmd.redirections) {
+        int flags = (r.fd == 0) ? O_RDONLY : (O_CREAT | O_WRONLY | (r.append ? O_APPEND : O_TRUNC));
+        int fd = open(r.filename.c_str(), flags, 0644);
+        if (fd < 0) { perror("open"); _exit(127); }
+        if (dup2(fd, r.fd) < 0) { perror("dup2"); _exit(127); }
+        close(fd);
+      }
+
+      // Find and exec command
+      auto exe_path_opt = get_path(cmd.args[0]);
+      if (!exe_path_opt) {
+        std::cerr << cmd.args[0] << ": command not found" << std::endl;
+        _exit(127);
+      }
+
+      std::vector<char*> argv;
+      argv.reserve(cmd.args.size() + 1);
+      // argv[0] is the program name
+      argv.push_back(const_cast<char*>(cmd.args[0].c_str()));
+      for (size_t j = 1; j < cmd.args.size(); ++j) {
+        argv.push_back(const_cast<char*>(cmd.args[j].c_str()));
+      }
+      argv.push_back(nullptr);
+
+      execv(exe_path_opt.value().string().c_str(), argv.data());
+      // If execv returns, an error occurred
+      perror("execv");
+      _exit(127);
+    }
+    // --- Parent Process ---
+    pids.push_back(pid);
+
+    // Close unneeded pipe ends
+    if (i > 0) {
+      close(in_fd); // Close previous pipe's read end
+    }
+    if (!is_last) {
+      close(pipe_fds[1]); // Close current pipe's write end
+      in_fd = pipe_fds[0]; // Save read end for the next child
+    }
+  }
+
+  // Parent: wait for all children to finish
+  for (pid_t pid : pids) {
+    int status = 0;
+    waitpid(pid, &status, 0);
+    // We could store and return the exit status of the *last* command,
+    // but for now, we just wait for all.
+  }
+#endif
 }

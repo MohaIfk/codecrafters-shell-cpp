@@ -44,7 +44,7 @@ inline std::optional<fs::path> get_home_directory() {
 // This is a conservative quoting implementation following MS rules:
 // - Surround by double quotes if it contains space or tab or is empty.
 // - Escape backslashes before a closing quote.
-static std::wstring windows_quote_arg(const std::string& s) {
+inline std::wstring windows_quote_arg(const std::string& s) {
   // convert UTF-8 std::string to wide string (UTF-16) for CreateProcessW
   int wlen = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
   std::wstring ws;
@@ -159,7 +159,7 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
 
   STARTUPINFOW si{};
   si.cb = sizeof(si);
-  if (!redir.empty()) si.dwFlags |= STARTF_USESTDHANDLES;
+  if (!redir.empty()) si.dwFlags = STARTF_USESTDHANDLES;
 
   // Open files for redirection
   HANDLE hFiles[3] = { INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE };

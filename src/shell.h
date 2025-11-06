@@ -28,7 +28,7 @@ class shell {
   std::string path;
   std::vector<std::string_view> path_dirs;
   std::filesystem::path working_directory_;
-  const std::vector<std::string> builtins = {"echo", "exit", "pwd", "cd", "type"};
+  const std::set<std::string> builtins = {"echo", "exit", "pwd", "cd", "type"};
   std::set<std::string> executable_cache;
 
 public:
@@ -41,7 +41,8 @@ public:
   static std::string find_lcp(const std::set<std::string>& matches);
   void handle_completion(std::string& line, bool second_tab = false) const;
   [[noreturn]] void run();
-  static Command parse_command_with_redirect(const std::string& line);
+  static std::vector<Command> parse_line_to_pipeline(const std::string &line);
+  // static Command parse_command_with_redirect(const std::string& line); replaced by parse_line_to_pipeline
   std::optional<std::filesystem::path> get_path(const std::string& name);
   const std::filesystem::path& working_directory();
   bool set_working_directory(const std::filesystem::path& dir);
@@ -49,5 +50,7 @@ public:
   static std::vector<std::string> split(const std::string & string, char c);
   static std::vector<std::string_view> split_view(const std::string & string, char c);
 
-  void dispatch(const Command &command);
+  void execute_simple_command(const Command &command);
+  void dispatch_pipeline(const std::vector<Command>& pipeline);
+  void execute_pipeline_external(const std::vector<Command>& pipeline);
 };
