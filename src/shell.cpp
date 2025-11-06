@@ -410,22 +410,47 @@ void shell::execute_builtin(const Command &command) {
     return;
   }
   if (args[0] == "history") {
-    for (int i = 1; args.size() > i; i++) {
-      const auto& arg = args[i];
-      if (arg == "-c") {
-        history_list.clear();
+    if (args.size() == 1) {
+      // history
+      for (size_t i = 0; i < history_list.size(); ++i) {
+        std::cout << "  " << (i + 1) << "\t" << history_list[i] << std::endl;
       }
-      if (arg == "-d" and args.size() > i + 1) {
-        int index = std::stoi(args[i + 1]);
+    } else if (args.size() == 2) {
+      if (args[1] == "-c") {
+        // history -c
+        history_list.clear();
+      } else {
+        // history n
+        int n = 0;
+        try {
+          n = std::stoi(args[1]);
+        } catch (...) {
+          std::cout << "Invalid history index" << std::endl;
+          return;
+        }
+        if (n < 1 || n > history_list.size()) {
+          std::cout << "Invalid history index" << std::endl;
+          return;
+        }
+        // only the last n entries.
+        for (auto i = history_list.size() - n; i < history_list.size(); ++i) {
+          std::cout << "  " << (i + 1) << "\t" << history_list[i] << std::endl;
+        }
+      }
+    } else if (args.size() == 3) {
+      if (args[1] == "-d") {
+        int index;
+        try {
+          index = std::stoi(args[2]);
+        } catch (...) {
+          std::cout << "Invalid history index" << std::endl;
+          return;
+        }
         if (index < 1 || index > history_list.size()) {
           std::cout << "Invalid history index" << std::endl;
-          continue;
         }
         history_list.erase(history_list.begin() + index - 1);
       }
-    }
-    for (size_t i = 0; i < history_list.size(); ++i) {
-      std::cout << "  " << (i + 1) << "\t" << history_list[i] << std::endl;
     }
     return;
   }
