@@ -200,10 +200,52 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
     line.clear();
     bool second_tab = false;
 
+    size_t history_index = history_list.size();
+    std::string current_line_backup;
+
     while (true) {
       int c = get_char_raw();
 
-      if (c == '\t') {
+      if (c == 27) { // ESCAPE key
+        int next1 = get_char_raw();
+        if (next1 == '[') {
+          int next2 = get_char_raw();
+          if (next2 == 'A') {
+            // UP arraw
+            if (!history_list.empty() && history_index > 0) {
+              if (history_index == history_list.size()) {
+                // first time pressing up saving the current line
+                current_line_backup = line;
+              }
+              history_index--;
+
+              // Clear the current line
+              std::cout << "\r$ " << std::string(line.size(), ' ') << "\r$ ";
+              line = history_list[history_index];
+              std::cout << line;
+              std::cout.flush();
+            }
+          } else if (next2 == 'B') {
+            // DOWN arrow
+            if (history_index < history_list.size()) {
+              history_index++;
+
+              std::cout << "\r$ " << std::string(line.size(), ' ') << "\r$ ";
+
+              if (history_index == history_list.size()) {
+                // Reached the bottom, restore the original line
+                line = current_line_backup;
+              } else {
+                line = history_list[history_index];
+              }
+              std::cout << line;
+              std::cout.flush();
+            }
+          }
+        }
+        second_tab = false;
+        continue;
+      } else if (c == '\t') {
         handle_completion(line, second_tab);
         second_tab = (!second_tab);
         continue;
@@ -211,7 +253,10 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
         std::cout << std::endl;
         if (line.empty()) break;
 
-        history_list.push_back(line);
+        // Prevent consecutive duplicates
+        if (history_list.empty() || history_list.back() != line) {
+          history_list.push_back(line);
+        }
 
         try {
           std::vector<Command> pipeline = parse_line_to_pipeline(line);
@@ -235,6 +280,8 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
       second_tab = false;
     }
   }
+
+  disableRawMode();
 }
 
 /**
