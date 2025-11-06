@@ -105,6 +105,32 @@ void shell::populate_executable_cache() {
   }
 }
 
+/**
+ * Finds the Longest Common Prefix (LCP) among a set of strings.
+ */
+std::string shell::find_lcp(const std::set<std::string>& matches) {
+  if (matches.empty()) {
+    return "";
+  }
+
+  std::string lcp = *matches.begin();
+
+  for (const auto& s : matches) {
+    size_t i = 0;
+    // Find the first character that differs
+    while (i < lcp.length() && i < s.length() && lcp[i] == s[i]) {
+      i++;
+    }
+
+    lcp = lcp.substr(0, i);
+
+    if (lcp.empty()) {
+      break;
+    }
+  }
+  return lcp;
+}
+
 void shell::handle_completion(std::string& line, bool second_tab) const {
   // Guard: Only complete the command itself, not its arguments
   // (We can extend this later, but for now, it's safer)
@@ -128,24 +154,39 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
     }
   }
 
-  if (matches.size() == 1) {
+  if (matches.empty()) {
+    std::cout << "\x07"; // Ring bell
+    std::cout.flush();
+  } else if (matches.size() == 1) {
     std::string completion = *matches.begin() + " "; // Get the single item
-    // Find the part we're missing
-    std::string remainder = completion.substr(line.length());
+    std::string remainder = completion.substr(line.length()); // Find the part we're missing
+
     line = completion;
     std::cout << remainder;
     std::cout.flush();
-  } else if (matches.empty() || (!second_tab)) {
-    std::cout << "\x07"; // Bell again Hhhhh (Ring ring!)
-    std::cout.flush();
   } else {
-    std::cout << "\n";
-    int i = 0;
-    for (auto& matche : matches) {
-      std::cout << ((i!=0) ? "  " : (i=1,"")) << matche;
+    std::string common_prefix = find_lcp(matches);
+    if (common_prefix.length() > line.length()) {
+      std::string remainder = common_prefix.substr(line.length());
+      line = common_prefix;
+      std::cout << remainder;
+      std::cout.flush();
+    } else {
+      if (second_tab) {
+        std::cout << "\n";
+        int i = 0;
+        for (const auto& match : matches) {
+          if (i > 0) std::cout << "  ";
+          std::cout << match;
+          i++;
+        }
+        std::cout << "\n$ " << line;
+        std::cout.flush();
+      } else {
+        std::cout << "\x07";
+        std::cout.flush();
+      }
     }
-    std::cout << "\n$ " << line;
-    std::cout.flush();
   }
 }
 

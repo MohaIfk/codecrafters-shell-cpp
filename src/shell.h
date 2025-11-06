@@ -37,6 +37,8 @@ public:
 
   static bool is_executable(const std::filesystem::path& p);
   void populate_executable_cache();
+
+  static std::string find_lcp(const std::set<std::string>& matches);
   void handle_completion(std::string& line, bool second_tab = false) const;
   [[noreturn]] void run();
   static Command parse_command_with_redirect(const std::string& line);
