@@ -135,16 +135,17 @@ void shell::handle_completion(std::string& line) const {
     line = completion;
     std::cout << remainder;
     std::cout.flush();
-  } else if (matches.size() == 0) {
+  } else if (matches.empty()) {
     std::cout << "\x07"; // Bell character
     std::cout.flush();
   } else {
     std::cout << "\x07"; // Bell again Hhhhh (Ring ring!)
     std::cout << "\n";
+    int i = 0;
     for (auto& matche : matches) {
-      std::cout << matche << "\n";
+      std::cout << ((i!=0) ? " " : (i=1,"")) << matche;
     }
-    std::cout << "$ " << line;
+    std::cout << "\n$ " << line;
     std::cout.flush();
   }
 }
