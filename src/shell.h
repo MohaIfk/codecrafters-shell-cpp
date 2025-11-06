@@ -28,8 +28,9 @@ class shell {
   std::string path;
   std::vector<std::string_view> path_dirs;
   std::filesystem::path working_directory_;
-  const std::set<std::string> builtins = {"echo", "exit", "pwd", "cd", "type"};
+  const std::set<std::string> builtins = {"echo", "exit", "pwd", "cd", "type", "history"};
   std::set<std::string> executable_cache;
+  std::vector<std::string> history_list;
 
 public:
   shell();

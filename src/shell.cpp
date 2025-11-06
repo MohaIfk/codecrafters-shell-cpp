@@ -211,6 +211,8 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
         std::cout << std::endl;
         if (line.empty()) break;
 
+        history_list.push_back(line);
+
         try {
           std::vector<Command> pipeline = parse_line_to_pipeline(line);
           dispatch_pipeline(pipeline);
@@ -405,6 +407,26 @@ void shell::execute_builtin(const Command &command) {
       return;
     }
     std::cout << args[1] << ": not found" << std::endl;
+    return;
+  }
+  if (args[0] == "history") {
+    for (int i = 1; args.size() > i; i++) {
+      const auto& arg = args[i];
+      if (arg == "-c") {
+        history_list.clear();
+      }
+      if (arg == "-d" and args.size() > i + 1) {
+        int index = std::stoi(args[i + 1]);
+        if (index < 1 || index > history_list.size()) {
+          std::cout << "Invalid history index" << std::endl;
+          continue;
+        }
+        history_list.erase(history_list.begin() + index - 1);
+      }
+    }
+    for (size_t i = 0; i < history_list.size(); ++i) {
+      std::cout << "  " << (i + 1) << "\t" << history_list[i] << std::endl;
+    }
     return;
   }
 }
