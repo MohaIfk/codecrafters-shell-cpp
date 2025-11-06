@@ -31,7 +31,7 @@ shell::shell() {
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
   try {
     working_directory_ = fs::current_path();
-  } catch (const fs::filesystem_error& e) {
+  } catch (const fs::filesystem_error&) {
     // fallback to root
     working_directory_ = fs::path("/");
   }
@@ -67,7 +67,8 @@ std::vector<std::string_view> shell::split_view(const std::string &string, char 
 
 // Helper function to check if a file is executable
 bool shell::is_executable(const std::filesystem::path &p) {
-  if (!fs::is_regular_file(p)) {
+  std::error_code ec;
+  if (!fs::is_regular_file(p, ec)) {
     return false;
   }
 
@@ -134,9 +135,16 @@ void shell::handle_completion(std::string& line) const {
     line = completion;
     std::cout << remainder;
     std::cout.flush();
-
   } else if (matches.size() == 0) {
     std::cout << "\x07"; // Bell character
+    std::cout.flush();
+  } else {
+    std::cout << "\x07"; // Bell again Hhhhh (Ring ring!)
+    std::cout << "\n";
+    for (auto& matche : matches) {
+      std::cout << matche << "\n";
+    }
+    std::cout << "$ " << line;
     std::cout.flush();
   }
 }

@@ -159,7 +159,7 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
 
   STARTUPINFOW si{};
   si.cb = sizeof(si);
-  si.dwFlags |= STARTF_USESTDHANDLES;
+  if (!redir.empty()) si.dwFlags |= STARTF_USESTDHANDLES;
 
   // Open files for redirection
   HANDLE hFiles[3] = { INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE };
@@ -195,7 +195,8 @@ inline std::optional<int> run_program_and_wait(const fs::path& exe, const std::v
       cmdbuf.data(),           // lpCommandLine (writable)
       nullptr,                 // lpProcessAttributes
       nullptr,                 // lpThreadAttributes
-      TRUE,                   // bInheritHandles
+      (redir.empty())
+        ? FALSE : TRUE,        // bInheritHandles
       0,                       // dwCreationFlags
       nullptr,                 // lpEnvironment
       nullptr,                 // lpCurrentDirectory
