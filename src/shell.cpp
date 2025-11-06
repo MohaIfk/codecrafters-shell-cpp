@@ -285,9 +285,6 @@ std::vector<Command> shell::parse_line_to_pipeline(const std::string &line) {
   return pipeline;
 }
 
-// Removed
-// Command shell::parse_command_with_redirect(const std::string &line)
-
 std::optional<fs::path> shell::get_path(const std::string& name) {
   for (auto& path_dir: path_dirs) {
     auto full_path = fs::path(path_dir) / name;
@@ -366,24 +363,11 @@ bool shell::set_working_directory(const fs::path &dir) {
   }
 }
 
-void shell::execute_simple_command(const Command &command) {
-  std::vector<std::string> args = command.args;
-
-  // Apply redirections temporarily
+void shell::execute_builtin(const Command &command) {
   ScopedRedir redir(command.redirections);
 
-  if (args[0] == "exit") {
-    if (args.size() == 2) {
-      try {
-        std::exit(std::stoi(args[1]));
-      } catch (std::invalid_argument&) {
-        std::cout << "Invalid argument (not a number)" << std::endl;
-      } catch (std::out_of_range&) {
-        std::cout << "number too large/small for int." << std::endl;
-      }
-    }
-    std::exit(0); // default
-  }
+  const auto& args = command.args;
+
   if (args[0] == "echo") {
     for (size_t i = 1; i < args.size(); i++) {
       std::cout << args[i];
@@ -412,24 +396,8 @@ void shell::execute_simple_command(const Command &command) {
     if (args.size() != 2) {
       std::cout << "Invalid arguments" << args[0] << std::endl;
     }
-    if (args[1] == "echo") {
-      std::cout << "echo is a shell builtin" << std::endl;
-      return;
-    }
-    if (args[1] == "exit") {
-      std::cout << "exit is a shell builtin" << std::endl;
-      return;
-    }
-    if (args[1] == "pwd") {
-      std::cout << "pwd is a shell builtin" << std::endl;
-      return;
-    }
-    if (args[1] == "cd") {
-      std::cout << "cd is a shell builtin" << std::endl;
-      return;
-    }
-    if (args[1] == "type") {
-      std::cout << "type is a shell builtin" << std::endl;
+    if (builtins.contains(args[1])) {
+      std::cout << args[1] << " is a shell builtin" << std::endl;
       return;
     }
     if (auto p = get_path(args[1])) {
@@ -439,15 +407,30 @@ void shell::execute_simple_command(const Command &command) {
     std::cout << args[1] << ": not found" << std::endl;
     return;
   }
+}
+
+void shell::execute_simple_command(const Command &command) {
+  const auto& args = command.args;
+
+  // Check for built-in
+  if (builtins.contains(args[0])) {
+    execute_builtin(command);
+    return;
+  }
+
+  // Not a built-in, must be an external command
   if (auto p = get_path(args[0])) {
     std::vector<std::string> passArgs;
     for (int i = 1; i < args.size(); i++) passArgs.emplace_back(args[i]);
+
+    // run_program_and_wait handles file redirections for this single process
     auto exitCodeOpt = run_program_and_wait(p.value(), passArgs, command.redirections);
     if (!exitCodeOpt) {
       std::cerr << "Failed to spawn program\n";
     }
     return;
   }
+
   std::cout << args[0] << ": command not found" << std::endl;
 }
 
@@ -474,20 +457,12 @@ void shell::dispatch_pipeline(const std::vector<Command> &pipeline) {
   }
 
   // This is a multi-command pipeline.
-  // For now, we only pipe external commands.
-  for (const auto& cmd : pipeline) {
-    if (builtins.contains(cmd.args[0])) {
-      std::cerr << "Error: Built-in command '" << cmd.args[0] << "' cannot be used in a pipeline." << std::endl;
-      return;
-    }
-  }
-
   // Execute the full pipeline
-  execute_pipeline_external(pipeline);
+  execute_pipeline(pipeline);
 }
 
-// I will probably move this function to utils.h in the future
-void shell::execute_pipeline_external(const std::vector<Command> &pipeline) {
+// The move of this function to utils.h is canceled du to depending on builtins, execute_builtin
+void shell::execute_pipeline(const std::vector<Command> &pipeline) {
 #ifdef _WIN32
   std::vector<PROCESS_INFORMATION> process_infos;
   std::vector<HANDLE> handles_to_close; // All handles the parent must close
@@ -654,34 +629,38 @@ void shell::execute_pipeline_external(const std::vector<Command> &pipeline) {
       }
 
       // Apply file redirections (overrides pipes)
-      for (auto &r : cmd.redirections) {
-        int flags = (r.fd == 0) ? O_RDONLY : (O_CREAT | O_WRONLY | (r.append ? O_APPEND : O_TRUNC));
-        int fd = open(r.filename.c_str(), flags, 0644);
-        if (fd < 0) { perror("open"); _exit(127); }
-        if (dup2(fd, r.fd) < 0) { perror("dup2"); _exit(127); }
-        close(fd);
-      }
+      if (builtins.contains(cmd.args[0])) {
+        execute_builtin(cmd);
+        _exit(0);
+      } else {
+        for (auto &r : cmd.redirections) {
+          int flags = (r.fd == 0) ? O_RDONLY : (O_CREAT | O_WRONLY | (r.append ? O_APPEND : O_TRUNC));
+          int fd = open(r.filename.c_str(), flags, 0644);
+          if (fd < 0) { perror("open"); _exit(127); }
+          if (dup2(fd, r.fd) < 0) { perror("dup2"); _exit(127); }
+          close(fd);
+        }
 
-      // Find and exec command
-      auto exe_path_opt = get_path(cmd.args[0]);
-      if (!exe_path_opt) {
-        std::cerr << cmd.args[0] << ": command not found" << std::endl;
+       // Find and exec command
+        auto exe_path_opt = get_path(cmd.args[0]);
+        if (!exe_path_opt) {
+          std::cerr << cmd.args[0] << ": command not found" << std::endl;
+          _exit(127);
+        }
+
+        std::vector<char*> argv;
+        argv.reserve(cmd.args.size() + 1);
+        // argv[0] is the program name
+        argv.push_back(const_cast<char*>(cmd.args[0].c_str()));
+        for (size_t j = 1; j < cmd.args.size(); ++j) {
+          argv.push_back(const_cast<char*>(cmd.args[j].c_str()));
+        }
+        argv.push_back(nullptr);
+
+        execv(exe_path_opt.value().string().c_str(), argv.data());
+        perror("execv");
         _exit(127);
       }
-
-      std::vector<char*> argv;
-      argv.reserve(cmd.args.size() + 1);
-      // argv[0] is the program name
-      argv.push_back(const_cast<char*>(cmd.args[0].c_str()));
-      for (size_t j = 1; j < cmd.args.size(); ++j) {
-        argv.push_back(const_cast<char*>(cmd.args[j].c_str()));
-      }
-      argv.push_back(nullptr);
-
-      execv(exe_path_opt.value().string().c_str(), argv.data());
-      // If execv returns, an error occurred
-      perror("execv");
-      _exit(127);
     }
     // --- Parent Process ---
     pids.push_back(pid);
