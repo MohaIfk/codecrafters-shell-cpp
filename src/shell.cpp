@@ -13,22 +13,29 @@
   #include <malloc.h> // for _dupenv_s (allocates with malloc)
 #endif
 
-shell::shell() {
+std::optional<std::string> getenv_safe(const std::string& VarName) {
 #ifdef _MSC_VER
   // _dupenv_s allocates a buffer with malloc which we must free.
   char* buffer = nullptr;
   size_t requiredSize = 0;
-  errno_t err = _dupenv_s(&buffer, &requiredSize, std::string("PATH").c_str());
+  errno_t err = _dupenv_s(&buffer, &requiredSize, VarName.c_str());
   if (err != 0 || buffer == nullptr) {
     if (buffer) std::free(buffer);
-    path = "";
+    return std::nullopt;
   }
   // take ownership into std::string then free the C buffer
-  path = std::string(buffer);
+  auto val = std::string(buffer);
   std::free(buffer);
+  return val;
 #else
-  path = std::getenv("PATH") ? std::getenv("PATH") : "";
+  auto val = std::getenv(VarName.c_str());
+  if (val) return val;
+  return std::nullopt;
 #endif
+}
+
+shell::shell() {
+  path = getenv_safe("PATH").value_or("");
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
   std::error_code ec;
   working_directory_ = fs::current_path(ec);
@@ -38,8 +45,12 @@ shell::shell() {
   }
 
   populate_executable_cache();
+  history_file_path = getenv_safe("HISTFILE").value_or("");
+  read_history();
 }
-shell::~shell() = default;
+shell::~shell() {
+  write_history();
+};
 
 std::vector<std::string> shell::split(const std::string &string, char c) {
   std::vector<std::string> parts;
@@ -104,6 +115,46 @@ void shell::populate_executable_cache() {
       }
     }
   }
+}
+
+void shell::read_history() {
+  if (history_file_path.empty()) return;
+  std::ifstream ifs(history_file_path);
+  if (!ifs.is_open()) {
+    std::cout << "history: " << history_file_path << ": No such file or directory" << std::endl;
+    return;
+  }
+
+  std::string line;
+  while (std::getline(ifs, line)) {
+    if (!line.empty()) {
+      history_list.push_back(line);
+    }
+  }
+  global_commited_history_index = history_list.size();
+}
+
+void shell::write_history() {
+  if (history_file_path.empty() || history_list.empty() || global_commited_history_index == history_list.size()) return;
+  std::ofstream ofs;
+  if (std::error_code ec; fs::exists(history_file_path, ec)) {
+    // append
+    ofs = std::ofstream(history_file_path, std::ios::app);
+  } else {
+    // create and write
+    ofs = std::ofstream(history_file_path);
+  }
+  if (!ofs.is_open()) {
+    std::cout << "history: " << history_file_path << ": No such file or directory" << std::endl;
+    return;
+  }
+
+  for (size_t i = global_commited_history_index; i < history_list.size(); i++) {
+    ofs << history_list[i] << "\n";
+  }
+
+  ofs.flush();
+  global_commited_history_index = history_list.size();
 }
 
 /**
@@ -373,7 +424,7 @@ std::vector<Command> shell::parse_line_to_pipeline(const std::string &line) {
   return pipeline;
 }
 
-std::optional<fs::path> shell::get_path(const std::string& name) {
+std::optional<fs::path> shell::get_path(const std::string& name) const {
   for (auto& path_dir: path_dirs) {
     auto full_path = fs::path(path_dir) / name;
 #ifdef _WIN32

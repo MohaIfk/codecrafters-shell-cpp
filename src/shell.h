@@ -26,12 +26,14 @@ struct Command {
 
 class shell {
   std::string path;
+  std::string history_file_path;
   std::vector<std::string_view> path_dirs;
   std::filesystem::path working_directory_;
   const std::set<std::string> builtins = {"echo", "exit", "pwd", "cd", "type", "history"};
   std::set<std::string> executable_cache;
   std::vector<std::string> history_list;
-  std::size_t commited_history_index = 0;
+  std::size_t global_commited_history_index = 0; // for global history management
+  std::size_t commited_history_index = 0; // for history builtin
 
 public:
   shell();
@@ -39,12 +41,14 @@ public:
 
   static bool is_executable(const std::filesystem::path& p);
   void populate_executable_cache();
+  void read_history();
+  void write_history();
 
   static std::string find_lcp(const std::set<std::string>& matches);
   void handle_completion(std::string& line, bool second_tab = false) const;
   [[noreturn]] void run();
   static std::vector<Command> parse_line_to_pipeline(const std::string &line);
-  std::optional<std::filesystem::path> get_path(const std::string& name);
+  std::optional<std::filesystem::path> get_path(const std::string& name) const;
   const std::filesystem::path& working_directory();
   bool set_working_directory(const std::filesystem::path& dir);
 
