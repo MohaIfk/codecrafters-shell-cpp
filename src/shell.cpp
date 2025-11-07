@@ -293,9 +293,9 @@ void shell::handle_completion(std::string& line, bool second_tab) const {
         if (line.empty()) break;
 
         // Prevent consecutive duplicates
-        if (history_list.empty() || history_list.back() != line) {
-          history_list.push_back(line);
-        }
+        // if (history_list.empty() || history_list.back() != line) {
+        history_list.push_back(line);
+        // }
 
         try {
           std::vector<Command> pipeline = parse_line_to_pipeline(line);
@@ -510,16 +510,23 @@ void shell::execute_builtin(const Command &command) {
         int n = 0;
         try {
           n = std::stoi(args[1]);
-        } catch (...) {
-          std::cout << "Invalid history index" << std::endl;
+        } catch (const std::invalid_argument& e) {
+          std::cout << "history: numeric argument required" << std::endl;
+          return;
+        } catch (const std::out_of_range& e) {
+          std::cout << "history: argument out of range" << std::endl;
           return;
         }
-        if (n < 1 || n > history_list.size()) {
-          std::cout << "Invalid history index" << std::endl;
+        if (n < 1) {
+          std::cout << "Invalid history argument: out of range" << std::endl;
           return;
         }
+
+        auto num_to_show = static_cast<size_t>(n);
+        size_t start_index = (num_to_show >= history_list.size()) ? 0 : (history_list.size() - num_to_show);
+
         // only the last n entries.
-        for (auto i = history_list.size() - n; i < history_list.size(); ++i) {
+        for (auto i = start_index; i < history_list.size(); ++i) {
           std::cout << "  " << (i + 1) << "\t" << history_list[i] << std::endl;
         }
       }
@@ -532,8 +539,11 @@ void shell::execute_builtin(const Command &command) {
         int index;
         try {
           index = std::stoi(args[2]);
-        } catch (...) {
-          std::cout << "Invalid history index" << std::endl;
+        } catch (const std::invalid_argument& e) {
+          std::cout << "history: numeric argument required" << std::endl;
+          return;
+        } catch (const std::out_of_range& e) {
+          std::cout << "history: argument out of range" << std::endl;
           return;
         }
         if (index < 1 || index > history_list.size()) {
@@ -574,17 +584,18 @@ void shell::execute_builtin(const Command &command) {
         // history -a [filename]
         // Append the "new" history lines to the history file. These are history lines entered since the beginning
         // of the current Bash session, but not already appended to the history file.
-        if (commited_history_index == history_list.size()) return; // can't be true (because this request is also added to the list so it is always +1)
-        std::ofstream f(args[2], std::ios::ate);
+        if (commited_history_index == history_list.size()) return; // can't be true (because this request is also added to the list so history_list.size() will always be at least commited_history_index + 1) but it won't hurt
+        std::ofstream f(args[2], std::ios::app);
         if (!f.is_open()) {
           std::cout << "history: " << args[2] << ": No such file or directory" << std::endl;
           return;
         }
 
-        for (;commited_history_index < history_list.size()+1; ++commited_history_index) {
-          f << history_list[commited_history_index-1] << "\n";
+        for (size_t i = commited_history_index; i < history_list.size(); ++i) {
+          f << history_list[i] << "\n";
         }
         f.flush();
+        commited_history_index = history_list.size();
       }
     }
     return;
