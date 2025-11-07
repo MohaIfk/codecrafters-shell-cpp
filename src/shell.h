@@ -31,6 +31,7 @@ class shell {
   const std::set<std::string> builtins = {"echo", "exit", "pwd", "cd", "type", "history"};
   std::set<std::string> executable_cache;
   std::vector<std::string> history_list;
+  std::size_t commited_history_index = 0;
 
 public:
   shell();

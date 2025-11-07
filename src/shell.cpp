@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "inputHelper.h"
 #include <optional>
+#include  <fstream>
 
 #ifdef _MSC_VER
   #include <cstring> // for errno_t
@@ -29,9 +30,9 @@ shell::shell() {
   path = std::getenv("PATH") ? std::getenv("PATH") : "";
 #endif
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
-  try {
-    working_directory_ = fs::current_path();
-  } catch (const fs::filesystem_error&) {
+  std::error_code ec;
+  working_directory_ = fs::current_path(ec);
+  if (ec) {
     // fallback to root
     working_directory_ = fs::path("/");
   }
@@ -524,6 +525,10 @@ void shell::execute_builtin(const Command &command) {
       }
     } else if (args.size() == 3) {
       if (args[1] == "-d") {
+        // history -d offset
+        // Delete the history entry at position offset. If offset is positive, it should be specified as it appears when the history
+        // is displayed. If offset is negative, it is interpreted as relative to one greater than the last history position,
+        // so negative indices count back from the end of the history, and an index of ‘-1’ refers to the current history -d command.
         int index;
         try {
           index = std::stoi(args[2]);
@@ -535,6 +540,51 @@ void shell::execute_builtin(const Command &command) {
           std::cout << "Invalid history index" << std::endl;
         }
         history_list.erase(history_list.begin() + index - 1);
+      } else if (args[1] == "-r") {
+        // history -r [filename]
+        // Read the history file and append its contents to the history list.
+        std::ifstream f(args[2]);
+        if (!f.is_open()) {
+          std::cout << "history: " << args[2] << ": No such file or directory" << std::endl;
+          return;
+        }
+
+        std::string line;
+        while (std::getline(f, line)) {
+          if (!line.empty()) {
+            history_list.push_back(line);
+          }
+        }
+        commited_history_index = history_list.size();
+      } else if (args[1] == "-w") {
+        // history -w [filename]
+        // Write the current history list to the history file, overwriting the history file.
+        std::ofstream f(args[2]);
+        if (!f.is_open()) {
+          std::cout << "history: " << args[2] << ": No such file or directory" << std::endl;
+          return;
+        }
+
+        for (auto &h: history_list) {
+          f << h << "\n";
+        }
+        f.flush();
+        commited_history_index = history_list.size();
+      } else if (args[1] == "-a") {
+        // history -a [filename]
+        // Append the "new" history lines to the history file. These are history lines entered since the beginning
+        // of the current Bash session, but not already appended to the history file.
+        if (commited_history_index == history_list.size()) return; // can't be true (because this request is also added to the list so it is always +1)
+        std::ofstream f(args[2], std::ios::ate);
+        if (!f.is_open()) {
+          std::cout << "history: " << args[2] << ": No such file or directory" << std::endl;
+          return;
+        }
+
+        for (;commited_history_index < history_list.size()+1; ++commited_history_index) {
+          f << history_list[commited_history_index-1] << "\n";
+        }
+        f.flush();
       }
     }
     return;
