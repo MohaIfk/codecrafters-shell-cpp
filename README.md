@@ -1,77 +1,65 @@
+# codecrafters-shell-cpp — C++ interactive shell
+
 [![progress-banner](https://backend.codecrafters.io/progress/shell/b4bb982c-8154-4a14-a2e1-7cfef9a34391)](https://app.codecrafters.io/users/MohaIfk?r=2qF)
 
-# codecrafters-shell-cpp
+This repository contains an enhanced C++ implementation of a small interactive
+shell (REPL). It started from the CodeCrafters "Build Your Own Shell"
+challenge and was extended with command history, tab completion, pipelines,
+redirections, cross-platform process spawning and several developer-friendly
+helpers.
 
-An enhanced C++ implementation of the "Build Your Own Shell" challenge from
-CodeCrafters. This repository contains a small interactive shell (REPL) that
-supports builtin commands, executing external programs, basic redirections, and
-cross-platform process launching on both POSIX and Windows.
 
-This README documents how to build and run the project, shows usage examples
-and explains a number of extensions implemented beyond the minimal starter
-requirements.
+## Key features (current)
 
-## Highlights / Features
+- Cross-platform process spawning: POSIX `fork`+`execv` and Windows
+  `CreateProcessW` implementations.
+- Pipeline support (`|`), including proper pipe wiring on POSIX and Windows.
+- Redirections: `>`, `>>` and numeric fd redirections (e.g. `2>err.txt`).
+- Builtin commands: `echo`, `cd` (supports `~`), `pwd`, `type`, `exit`,
+  `history` (with `-c`, `-d`, `-r`, `-w`, `-a` subcommands).
+- Command history: in-memory list plus optional file persistence controlled by
+  the `HISTFILE` environment variable.
+- Tab completion for commands (uses a cached set of executables + builtins).
+- Robust argument parsing including single/double quotes and backslash
+  escapes; throws on unclosed quotes.
+- Terminal raw-mode input and arrow-key navigation for history (POSIX via
+  `termios`, Windows via `_getch`).
+- Scoped redirections for builtins so builtins honor redirection during their
+  execution.
 
-- Cross-platform: builds and runs on POSIX (Linux/WSL/macOS) and Windows.
-- Builtin commands: `echo`, `cd` (supports `~`), `pwd`, `type`, `exit`.
-- External program execution (resolves PATH entries).
-- Redirections: supports `>`, `>>` and numeric fds like `2>err.txt`.
-- Robust argument parsing: single/double quotes, backslash escapes inside and
-   outside quotes, and error on unclosed quotes.
-- Windows-specific support: `.exe/.bat/.cmd` resolution, CreateProcessW based
-   spawning, and careful argument quoting and UTF-8 -> UTF-16 conversion.
-- Scoped redirections for builtins (so builtins honor redirected stdout/stderr).
-- `cd` resolves and canonicalizes the target directory and supports `~`.
+## Project layout (important files)
 
-The implementation files of note are in `src/`:
+- `src/main.cpp` — program entrypoint.
+- `src/shell.h`, `src/shell.cpp` — main shell class, parsing, dispatching,
+  builtins, pipeline execution, completion and history.
+- `src/utils.h` — helpers: `getenv_safe`, `get_home_directory`, `run_program_and_wait`,
+  `parse_args`, and `ScopedRedir`.
+- `src/inputHelper.h` — small cross-platform helper for raw-mode input and
+  `get_char_raw()` abstraction used by the REPL.
+- `CMakeLists.txt` — build configuration.
 
-- `src/main.cpp` — program entrypoint and minimal runner.
-- `src/shell.h`, `src/shell.cpp` — shell class, parsing, dispatching, PATH
-   resolution and builtin implementations.
-- `src/utils.h` — process launching (POSIX fork/exec and Windows CreateProcess),
-   argument parser, home directory lookup, redirection helpers, etc.
+## Quick developer contract
 
-## What I implemented beyond the starter (quick summary)
+- Input: user-entered command lines (strings) via a REPL prompt.
+- Output: stdout/stderr of builtins and spawned processes; exit status comes
+  from executed programs (pipelines are executed and waited upon).
+- Error modes: parsing errors (e.g. unclosed quotes) raise runtime errors
+  printed to stderr; spawn errors return messages to stderr.
 
-If you or someone on your team extended the starter, the most notable additions
-in this codebase are:
+Edge cases considered: empty lines, unclosed quotes, missing redirection
+targets, trying to run non-executable files, and PATH entries with permission
+errors (these are skipped during executable cache population).
 
-- Full cross-platform process launching: CreateProcessW for Windows with
-   careful quoting and UTF-8 to UTF-16 conversion. POSIX uses `fork` + `execv`.
-- Argument parser that closely mirrors shell-like quoting behavior (single
-   quotes, double quotes with limited escaping, and backslash escapes).
-- Redirection parsing and handling that supports numeric fds and append
-   (`>>`) and a `ScopedRedir` helper that temporarily redirects file
-   descriptors for builtin commands.
-- PATH-resolution that tries platform-appropriate executable extensions on
-   Windows (.exe, .bat, .cmd) and checks executable bit on POSIX.
-- Improved `cd` handling: supports `~` and canonicalizes the working
-   directory (resolving symlinks where possible).
+## Build (Windows and POSIX)
 
-These features make the shell more robust and suitable for manual testing on
-both Windows and POSIX environments.
+Requirements: C++20 compiler, CMake (3.10+ recommended).
 
-## Requirements
-
-- C++17 compatible compiler (MSVC, g++, clang++)
-- CMake (3.10+ recommended)
-- On Windows: Visual Studio or Build Tools (so CMake can generate a Visual
-   Studio solution or Ninja files). On Linux/WSL: make/ninja + standard build
-   toolchain.
-
-## Build and run
-
-The repository contains a CMake-based build. Example commands below assume you
-run them from the repository root.
-
-Windows (recommended via Developer Command Prompt or PowerShell):
+Windows (Developer Command Prompt / PowerShell):
 
 ```powershell
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release
-# Executable will usually be at build\Release\shell.exe (or the configured target dir)
-.
+# Executable typically: build\Release\shell.exe
 ```
 
 WSL / Linux / macOS:
@@ -79,15 +67,15 @@ WSL / Linux / macOS:
 ```bash
 cmake -S . -B cmake-build-debug-wsl -DCMAKE_BUILD_TYPE=Release
 cmake --build cmake-build-debug-wsl -- -j$(nproc)
-# Executable will be at cmake-build-debug-wsl/shell
+# Executable typically: cmake-build-debug-wsl/shell
 ```
 
-You can also use the provided `your_program.sh` wrapper if present and
-appropriate for your environment (it simply runs the built executable).
+There is a helper script `your_program.sh` that can be adapted to run the
+built binary in your environment.
 
-## Usage examples
+## Runtime usage (examples)
 
-Run the shell (example path depends on your build):
+Start the shell and try commands:
 
 ```bash
 ./cmake-build-debug-wsl/shell
@@ -95,54 +83,70 @@ Run the shell (example path depends on your build):
 build\Release\shell.exe
 ```
 
-Once inside the prompt, try examples:
+Examples inside the prompt:
 
-- Builtins:
+- Simple builtins:
+  - echo: `echo hello world`
+  - pwd: `pwd`
+  - cd: `cd /tmp` or `cd ~`
+  - type: `type ls` or `type echo`
+  - exit: `exit` or `exit 2`
 
-- echo: `echo hello world`
-- pwd: `pwd`
-- cd: `cd /tmp` or `cd ~`
-- type: `type ls` or `type echo`
-- exit: `exit` or `exit 2`
+- History:
+  - up/down arrows to navigate previous commands (raw-mode input)
+  - `HISTFILE` env var controls persisted history file path; history is read
+    at startup and appended on exit (if configured).
+  - `history` builtin examples: `history`, `history 10`, `history -c`,
+    `history -d 5`, `history -w historyfile`, `history -r historyfile`,
+    `history -a historyfile`.
 
-- External commands:
+- External programs and completion:
+  - tab completion for commands (builtins + cached executables from `PATH`).
+  - `type <name>` reports whether a name is a builtin or prints the resolved
+    path to an executable.
 
-- `ls -la` (POSIX)
-- `dir` (Windows cmd builtin via external program resolution if available)
-
-- Redirection examples:
-
-- `echo hi > out.txt` (overwrite)
-- `echo again >> out.txt` (append)
-- `ls 2> err.txt` (redirect stderr to file)
-- `myprog 1>out.txt 2>>err.txt` (mix stdout overwrite + stderr append)
+- Pipelines and redirections:
+  - `ls -la | grep txt | wc -l`
+  - `echo hi > out.txt`
+  - `echo again >> out.txt`
+  - `ls 2> err.txt`
+  - `myprog 1>out.txt 2>>err.txt`
 
 Notes:
 
 - Numeric fd redirections are supported (e.g. `2>file` targets stderr).
 - Builtins use `ScopedRedir` so redirection affects builtin output as expected.
 
-## Manual tests to verify functionality
+## Developer notes — where to look
 
-1. Build the project (see Build instructions).
-2. Start the shell executable.
-3. Verify builtins: run `echo`, `pwd`, `cd`, `type`, `exit`.
-4. Verify external programs: run `which`/`type` or `ls`/`dir` depending on
-    platform (or run a small program you compiled and put on PATH).
-5. Verify redirections: `echo hello > /tmp/test.txt`, then `cat /tmp/test.txt`.
-6. On Windows, test an `.exe` in PATH and a `.bat` script; `type` should show
-    resolved paths.
+- Argument parsing: `parse_args` in `src/utils.h`.
+- Line parsing into pipeline + redirections: `parse_line_to_pipeline` in
+  `src/shell.cpp`.
+- Pipeline execution: `execute_pipeline` in `src/shell.cpp` (separate
+  implementations for POSIX and Windows).
+- Single-command execution: `execute_simple_command` and `run_program_and_wait`
+  (`src/utils.h`).
+- History and completion: `populate_executable_cache`, `read_history`,
+  `write_history`, `handle_completion` in `src/shell.cpp`.
+- Terminal input: `enableRawMode`, `disableRawMode`, and `get_char_raw` in
+  `src/inputHelper.h`.
 
-## Where to look in the code
+## Limitations and next improvements
 
-- `parse_args` in `src/utils.h` — argument parsing.
-- `parse_command_with_redirect` in `src/shell.cpp` — builds `Command` with
-   argument vector and redirections parsed.
-- `run_program_and_wait` in `src/utils.h` — platform-specific spawning.
-- `ScopedRedir` in `src/utils.h` — temporarily redirects fds for builtins.
+- No job control (background `&`, `fg`, `bg`) yet.
+- Environment variable and tilde expansion is limited (tilde `~` support in
+  `cd` only). No `$VAR` expansion or globbing implemented.
+- Quoting and escaping aims to be shell-like but is not a full POSIX shell
+  parser; edge cases may differ from bash/zsh.
+
+Planned/possible next steps (I can implement any of these on request):
+
+- Add `$VAR` expansion and filename globbing.
+- Implement job control and background/foreground management.
+- Add unit tests for `parse_args`, `parse_line_to_pipeline` and
+  `execute_pipeline` behavior.
 
 ## License & attribution
 
-This solution is based on the CodeCrafters Shell challenge. Follow the
-original challenge terms where applicable when publishing or sharing your
-solution.
+This project was started from the CodeCrafters Shell challenge. Respect the
+original challenge terms when sharing or publishing derived work.
