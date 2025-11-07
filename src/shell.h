@@ -38,6 +38,7 @@ class shell {
 public:
   shell();
   ~shell();
+  void exit(int n);
 
   static bool is_executable(const std::filesystem::path& p);
   void populate_executable_cache();

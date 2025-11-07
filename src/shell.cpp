@@ -52,6 +52,11 @@ shell::~shell() {
   write_history();
 };
 
+void shell::exit(int n) {
+  write_history();
+  std::exit(n);
+}
+
 std::vector<std::string> shell::split(const std::string &string, char c) {
   std::vector<std::string> parts;
   std::string::size_type pos = 0;
@@ -688,12 +693,12 @@ void shell::dispatch_pipeline(const std::vector<Command> &pipeline) {
       disableRawMode();
       if (pipeline[0].args.size() == 2) {
         try {
-          std::exit(std::stoi(pipeline[0].args[1]));
+          exit(std::stoi(pipeline[0].args[1]));
         } catch (...) {
           std::cout << "Invalid exit code." << std::endl;
         }
       }
-      std::exit(0); // Default exit
+      exit(0); // Default exit
     }
     // Just a single command, run it normally
     execute_simple_command(pipeline[0]);
@@ -860,13 +865,13 @@ void shell::execute_pipeline(const std::vector<Command> &pipeline) {
     if (pid == 0) { // --- Child Process ---
       // Set up input
       if (i > 0) {
-        if (dup2(in_fd, STDIN_FILENO) < 0) { perror("dup2"); _exit(127); }
+        if (dup2(in_fd, STDIN_FILENO) < 0) { perror("dup2"); exit(127); }
         close(in_fd); // Close original
       }
 
       // Set up output
       if (!is_last) {
-        if (dup2(pipe_fds[1], STDOUT_FILENO) < 0) { perror("dup2"); _exit(127); }
+        if (dup2(pipe_fds[1], STDOUT_FILENO) < 0) { perror("dup2"); exit(127); }
         // Child doesn't need pipe ends after dup2
         close(pipe_fds[0]);
         close(pipe_fds[1]);
@@ -875,13 +880,13 @@ void shell::execute_pipeline(const std::vector<Command> &pipeline) {
       // Apply file redirections (overrides pipes)
       if (builtins.contains(cmd.args[0])) {
         execute_builtin(cmd);
-        _exit(0);
+        exit(0);
       } else {
         for (auto &r : cmd.redirections) {
           int flags = (r.fd == 0) ? O_RDONLY : (O_CREAT | O_WRONLY | (r.append ? O_APPEND : O_TRUNC));
           int fd = open(r.filename.c_str(), flags, 0644);
-          if (fd < 0) { perror("open"); _exit(127); }
-          if (dup2(fd, r.fd) < 0) { perror("dup2"); _exit(127); }
+          if (fd < 0) { perror("open"); exit(127); }
+          if (dup2(fd, r.fd) < 0) { perror("dup2"); exit(127); }
           close(fd);
         }
 
@@ -889,7 +894,7 @@ void shell::execute_pipeline(const std::vector<Command> &pipeline) {
         auto exe_path_opt = get_path(cmd.args[0]);
         if (!exe_path_opt) {
           std::cerr << cmd.args[0] << ": command not found" << std::endl;
-          _exit(127);
+          exit(127);
         }
 
         std::vector<char*> argv;
@@ -903,7 +908,7 @@ void shell::execute_pipeline(const std::vector<Command> &pipeline) {
 
         execv(exe_path_opt.value().string().c_str(), argv.data());
         perror("execv");
-        _exit(127);
+        exit(127);
       }
     }
     // --- Parent Process ---
