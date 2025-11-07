@@ -17,23 +17,44 @@
 
 namespace fs = std::filesystem;
 
+inline std::optional<std::string> getenv_safe(const std::string& VarName) {
+#ifdef _MSC_VER
+  // _dupenv_s allocates a buffer with malloc which we must free.
+  char* buffer = nullptr;
+  size_t requiredSize = 0;
+  errno_t err = _dupenv_s(&buffer, &requiredSize, VarName.c_str());
+  if (err != 0 || buffer == nullptr) {
+    if (buffer) std::free(buffer);
+    return std::nullopt;
+  }
+  // take ownership into std::string then free the C buffer
+  auto val = std::string(buffer);
+  std::free(buffer);
+  return val;
+#else
+  auto val = std::getenv(VarName.c_str());
+  if (val) return val;
+  return std::nullopt;
+#endif
+}
+
 inline std::optional<fs::path> get_home_directory() {
 #ifdef _WIN32
   // First try USERPROFILE
-  if (const char* userprofile = std::getenv("USERPROFILE")) {
-    return fs::path(userprofile);
-  }
+  if (auto up = getenv_safe("USERPROFILE")) {
+    return fs::path(up.value());
+}
   // Fallback: HOMEDRIVE + HOMEPATH
-  const char* homedrive = std::getenv("HOMEDRIVE");
-  const char* homepath = std::getenv("HOMEPATH");
-  if (homedrive && homepath) {
-    return fs::path(std::string(homedrive) + std::string(homepath));
+  auto homedrive = getenv_safe("HOMEDRIVE").value_or("");
+  auto homepath = getenv_safe("HOMEPATH").value_or("");
+  if (!(homedrive.empty() || homepath.empty())) {
+    return fs::path(homedrive + homepath);
   }
   return std::nullopt;
 #else
   // POSIX: $HOME
-  if (const char* home = std::getenv("HOME")) {
-    return fs::path(home);
+  if (auto h = getenv_safe("HOME")) {
+    return fs::path(h.value());
   }
   return std::nullopt;
 #endif
@@ -366,8 +387,20 @@ public:
 #ifdef _WIN32
       int flags = _O_TEXT | (r.fd == 0 ? _O_RDONLY : _O_WRONLY | _O_CREAT);
       if (r.append) flags |= _O_APPEND; else flags |= _O_TRUNC;
-      int fd = _wopen(windows_widen(r.filename).c_str(), flags, _S_IREAD | _S_IWRITE);
-      if (fd < 0) continue;
+
+      int fd = -1;
+      const int pmode = _S_IREAD | _S_IWRITE; // Permissions
+      const int shflag = _SH_DENYNO; // which allows other processes to read and write to the file, mimicking typical shell redirection behavior.
+
+      errno_t err = _wsopen_s(
+          &fd,
+          windows_widen(r.filename).c_str(),
+          flags,
+          shflag,
+          pmode
+      );
+
+      if (err != 0 || fd < 0) continue;
 
       old_fds.push_back(target_fd);
       old_copies.push_back(_dup(target_fd));

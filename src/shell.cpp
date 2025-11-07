@@ -13,27 +13,6 @@
   #include <malloc.h> // for _dupenv_s (allocates with malloc)
 #endif
 
-std::optional<std::string> getenv_safe(const std::string& VarName) {
-#ifdef _MSC_VER
-  // _dupenv_s allocates a buffer with malloc which we must free.
-  char* buffer = nullptr;
-  size_t requiredSize = 0;
-  errno_t err = _dupenv_s(&buffer, &requiredSize, VarName.c_str());
-  if (err != 0 || buffer == nullptr) {
-    if (buffer) std::free(buffer);
-    return std::nullopt;
-  }
-  // take ownership into std::string then free the C buffer
-  auto val = std::string(buffer);
-  std::free(buffer);
-  return val;
-#else
-  auto val = std::getenv(VarName.c_str());
-  if (val) return val;
-  return std::nullopt;
-#endif
-}
-
 shell::shell() {
   path = getenv_safe("PATH").value_or("");
   path_dirs = split_view(path, PATH_LIST_SEPARATOR);
@@ -566,10 +545,10 @@ void shell::execute_builtin(const Command &command) {
         int n = 0;
         try {
           n = std::stoi(args[1]);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           std::cout << "history: numeric argument required" << std::endl;
           return;
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           std::cout << "history: argument out of range" << std::endl;
           return;
         }
@@ -595,10 +574,10 @@ void shell::execute_builtin(const Command &command) {
         int index;
         try {
           index = std::stoi(args[2]);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           std::cout << "history: numeric argument required" << std::endl;
           return;
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           std::cout << "history: argument out of range" << std::endl;
           return;
         }
